@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Iris.Api/Iris.Api.csproj" />
+    <Project Path="src/Iris.Application/Iris.Application.csproj" />
+    <Project Path="src/Iris.Domain/Iris.Domain.csproj" />
+    <Project Path="src/Iris.Infrastructure/Iris.Infrastructure.csproj" />
+  </Folder>
+</Solution>
