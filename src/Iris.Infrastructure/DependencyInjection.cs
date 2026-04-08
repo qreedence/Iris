@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Iris.Infrastructure.Persistence;
+using Iris.Application.AiIntegration;
 
 namespace Iris.Infrastructure
 {
@@ -13,6 +14,8 @@ namespace Iris.Infrastructure
         {
             services.AddDbContext<AppDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("DefaultConnection")));
+
+            //services.AddScoped<IChatProvider, [ChatProviderImplementation]>(); 
 
             return services;
         }
