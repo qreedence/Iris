@@ -1,8 +1,9 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Iris.Application.AiIntegration;
+using Iris.Infrastructure.AiIntegration;
+using Iris.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Iris.Infrastructure.Persistence;
-using Iris.Application.AiIntegration;
 
 namespace Iris.Infrastructure
 {
@@ -15,7 +16,21 @@ namespace Iris.Infrastructure
             services.AddDbContext<AppDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("DefaultConnection")));
 
-            //services.AddScoped<IChatProvider, [ChatProviderImplementation]>(); 
+            // OpenRouter
+            services.Configure<OpenRouterOptions>(
+                configuration.GetSection(OpenRouterOptions.SectionName));
+
+            services.AddHttpClient<IChatProvider, OpenRouterChatProvider>((sp, client) =>
+            {
+                var options = configuration
+                    .GetSection(OpenRouterOptions.SectionName)
+                    .Get<OpenRouterOptions>()!;
+
+                client.BaseAddress = new Uri(options.BaseUrl);
+                client.DefaultRequestHeaders.Add("Authorization", $"Bearer {options.ApiKey}");
+                client.DefaultRequestHeaders.Add("HTTP-Referer", options.AppUrl);
+                client.DefaultRequestHeaders.Add("X-OpenRouter-Title", options.AppTitle);
+            });
 
             return services;
         }
