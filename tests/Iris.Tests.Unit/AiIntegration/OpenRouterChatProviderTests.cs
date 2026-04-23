@@ -1,4 +1,5 @@
-﻿using Iris.Application.AiIntegration.Exceptions;
+﻿using FluentAssertions;
+using Iris.Application.AiIntegration.Exceptions;
 using Iris.Application.AiIntegration.Models;
 using Iris.Domain.AiIntegration;
 using Iris.Infrastructure.AiIntegration;
@@ -59,6 +60,45 @@ public class OpenRouterChatProviderTests
         };
     }
 
+    private static HttpResponseMessage CreateCompletionResponseWithoutUsage(string content = "Hello!")
+    {
+        var json = JsonSerializer.Serialize(new
+        {
+            id = "resp_123",
+            output = new[]
+            {
+                new
+                {
+                    type = "message",
+                    content = new[]
+                    {
+                        new { type = "output_text", text = content }
+                    }
+                }
+            }
+        });
+
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+    }
+
+    private static HttpResponseMessage CreateEmptyOutputResponse()
+    {
+        var json = JsonSerializer.Serialize(new
+        {
+            id = "resp_123",
+            output = Array.Empty<object>(),
+            usage = new { input_tokens = 5, output_tokens = 0, total_tokens = 5 }
+        });
+
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+    }
+
     private static HttpResponseMessage CreateStreamResponse(params string[] events)
     {
         var sse = string.Join("\n\n", events) + "\n\n";
@@ -74,7 +114,9 @@ public class OpenRouterChatProviderTests
     private static string CompletedEvent(int input = 10, int output = 5, int total = 15) =>
         $"event: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":{{\"usage\":{{\"input_tokens\":{input},\"output_tokens\":{output},\"total_tokens\":{total}}}}}}}";
 
-    private static (OpenRouterChatProvider provider, MockHttpHandler handler) CreateProvider(
+    private static string DoneEvent() => "data: [DONE]";
+
+    private static (OpenRouterChatProvider sut, MockHttpHandler handler) CreateProvider(
         HttpResponseMessage response)
     {
         var handler = new MockHttpHandler(response);
@@ -111,58 +153,58 @@ public class OpenRouterChatProviderTests
     [Fact]
     public async Task CompleteAsync_SendsCorrectRequestShape()
     {
-        var (provider, handler) = CreateProvider(CreateCompletionResponse());
+        var (sut, handler) = CreateProvider(CreateCompletionResponse());
 
-        await provider.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
+        await sut.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, handler.CallCount);
-        Assert.Equal(HttpMethod.Post, handler.LastRequest!.Method);
-        Assert.Equal("/api/v1/responses", handler.LastRequest.RequestUri!.AbsolutePath);
+        handler.CallCount.Should().Be(1);
+        handler.LastRequest!.Method.Should().Be(HttpMethod.Post);
+        handler.LastRequest.RequestUri!.AbsolutePath.Should().Be("/api/v1/responses");
 
         var body = JsonDocument.Parse(handler.LastRequestBody!);
-        Assert.Equal("test/model", body.RootElement.GetProperty("model").GetString());
-        Assert.Equal("user", body.RootElement.GetProperty("input")[0].GetProperty("role").GetString());
-        Assert.Equal("Hello", body.RootElement.GetProperty("input")[0].GetProperty("content").GetString());
+        body.RootElement.GetProperty("model").GetString().Should().Be("test/model");
+        body.RootElement.GetProperty("input")[0].GetProperty("role").GetString().Should().Be("user");
+        body.RootElement.GetProperty("input")[0].GetProperty("content").GetString().Should().Be("Hello");
     }
 
     [Fact]
     public async Task CompleteAsync_WithModelParameters_IncludesInRequest()
     {
-        var (provider, handler) = CreateProvider(CreateCompletionResponse());
+        var (sut, handler) = CreateProvider(CreateCompletionResponse());
 
-        await provider.CompleteAsync(CreateRequest(
+        await sut.CompleteAsync(CreateRequest(
             modelParameters: new ModelParameters(0.7f, 500, 0.9f)), TestContext.Current.CancellationToken);
 
         var body = JsonDocument.Parse(handler.LastRequestBody!);
-        Assert.Equal(0.7f, body.RootElement.GetProperty("temperature").GetSingle());
-        Assert.Equal(500, body.RootElement.GetProperty("max_output_tokens").GetInt32());
-        Assert.Equal(0.9f, body.RootElement.GetProperty("top_p").GetSingle());
+        body.RootElement.GetProperty("temperature").GetSingle().Should().Be(0.7f);
+        body.RootElement.GetProperty("max_output_tokens").GetInt32().Should().Be(500);
+        body.RootElement.GetProperty("top_p").GetSingle().Should().Be(0.9f);
     }
 
     [Fact]
     public async Task CompleteAsync_WithSystemPrompt_IncludesInRequest()
     {
-        var (provider, handler) = CreateProvider(CreateCompletionResponse());
+        var (sut, handler) = CreateProvider(CreateCompletionResponse());
 
-        await provider.CompleteAsync(CreateRequest(systemPrompt: "You are helpful."), TestContext.Current.CancellationToken);
+        await sut.CompleteAsync(CreateRequest(systemPrompt: "You are helpful."), TestContext.Current.CancellationToken);
 
         var body = JsonDocument.Parse(handler.LastRequestBody!);
-        Assert.Equal("You are helpful.", body.RootElement.GetProperty("instructions").GetString());
+        body.RootElement.GetProperty("instructions").GetString().Should().Be("You are helpful.");
     }
 
     [Fact]
     public async Task CompleteAsync_WithNullOptionals_OmitsFromJson()
     {
-        var (provider, handler) = CreateProvider(CreateCompletionResponse());
+        var (sut, handler) = CreateProvider(CreateCompletionResponse());
 
-        await provider.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
+        await sut.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
 
         var body = JsonDocument.Parse(handler.LastRequestBody!);
-        Assert.False(body.RootElement.TryGetProperty("instructions", out _));
-        Assert.False(body.RootElement.TryGetProperty("temperature", out _));
-        Assert.False(body.RootElement.TryGetProperty("max_output_tokens", out _));
-        Assert.False(body.RootElement.TryGetProperty("top_p", out _));
-        Assert.False(body.RootElement.TryGetProperty("stream", out _));
+        body.RootElement.TryGetProperty("instructions", out _).Should().BeFalse();
+        body.RootElement.TryGetProperty("temperature", out _).Should().BeFalse();
+        body.RootElement.TryGetProperty("max_output_tokens", out _).Should().BeFalse();
+        body.RootElement.TryGetProperty("top_p", out _).Should().BeFalse();
+        body.RootElement.TryGetProperty("stream", out _).Should().BeFalse();
     }
 
     // --- §2: Response Deserialization ---
@@ -170,36 +212,57 @@ public class OpenRouterChatProviderTests
     [Fact]
     public async Task CompleteAsync_ValidResponse_ReturnsChatResponse()
     {
-        var (provider, _) = CreateProvider(CreateCompletionResponse("Hi!"));
+        var (sut, _) = CreateProvider(CreateCompletionResponse("Hi!"));
 
-        var result = await provider.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
+        var result = await sut.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
 
-        Assert.Equal("Hi!", result.Content);
+        result.Content.Should().Be("Hi!");
     }
 
     [Fact]
     public async Task CompleteAsync_ValidResponse_MapsUsageInfo()
     {
-        var (provider, _) = CreateProvider(
+        var (sut, _) = CreateProvider(
             CreateCompletionResponse(inputTokens: 25, outputTokens: 12, totalTokens: 37));
 
-        var result = await provider.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
+        var result = await sut.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
 
-        Assert.NotNull(result.UsageInfo);
-        Assert.Equal(25, result.UsageInfo.InputTokens);
-        Assert.Equal(12, result.UsageInfo.OutputTokens);
-        Assert.Equal(37, result.UsageInfo.TotalTokens);
+        result.UsageInfo.Should().NotBeNull();
+        result.UsageInfo!.InputTokens.Should().Be(25);
+        result.UsageInfo.OutputTokens.Should().Be(12);
+        result.UsageInfo.TotalTokens.Should().Be(37);
     }
 
     [Fact]
     public async Task CompleteAsync_ModelPassthrough()
     {
-        var (provider, handler) = CreateProvider(CreateCompletionResponse());
+        var (sut, handler) = CreateProvider(CreateCompletionResponse());
 
-        await provider.CompleteAsync(CreateRequest(model: "anthropic/claude-sonnet-4"), TestContext.Current.CancellationToken);
+        await sut.CompleteAsync(CreateRequest(model: "anthropic/claude-sonnet-4"), TestContext.Current.CancellationToken);
 
         var body = JsonDocument.Parse(handler.LastRequestBody!);
-        Assert.Equal("anthropic/claude-sonnet-4", body.RootElement.GetProperty("model").GetString());
+        body.RootElement.GetProperty("model").GetString().Should().Be("anthropic/claude-sonnet-4");
+    }
+
+    [Fact]
+    public async Task CompleteAsync_EmptyOutput_ReturnsEmptyContent()
+    {
+        var (sut, _) = CreateProvider(CreateEmptyOutputResponse());
+
+        var result = await sut.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
+
+        result.Content.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CompleteAsync_MissingUsage_ReturnsNullUsageInfo()
+    {
+        var (sut, _) = CreateProvider(CreateCompletionResponseWithoutUsage());
+
+        var result = await sut.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
+
+        result.Content.Should().Be("Hello!");
+        result.UsageInfo.Should().BeNull();
     }
 
     // --- §3: Streaming ---
@@ -211,14 +274,14 @@ public class OpenRouterChatProviderTests
             DeltaEvent("Hello"),
             DeltaEvent(" world"),
             CompletedEvent());
-        var (provider, _) = CreateProvider(response);
+        var (sut, _) = CreateProvider(response);
 
         var chunks = new List<StreamedChunk>();
-        await foreach (var chunk in provider.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+        await foreach (var chunk in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
             chunks.Add(chunk);
 
-        Assert.Equal("Hello", chunks[0].Content);
-        Assert.Equal(" world", chunks[1].Content);
+        chunks[0].Content.Should().Be("Hello");
+        chunks[1].Content.Should().Be(" world");
     }
 
     [Fact]
@@ -227,14 +290,14 @@ public class OpenRouterChatProviderTests
         var response = CreateStreamResponse(
             DeltaEvent("Hi"),
             CompletedEvent());
-        var (provider, _) = CreateProvider(response);
+        var (sut, _) = CreateProvider(response);
 
         var chunks = new List<StreamedChunk>();
-        await foreach (var chunk in provider.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+        await foreach (var chunk in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
             chunks.Add(chunk);
 
-        Assert.False(chunks[0].IsComplete);
-        Assert.True(chunks.Last().IsComplete);
+        chunks[0].IsComplete.Should().BeFalse();
+        chunks.Last().IsComplete.Should().BeTrue();
     }
 
     [Fact]
@@ -243,17 +306,17 @@ public class OpenRouterChatProviderTests
         var response = CreateStreamResponse(
             DeltaEvent("Hi"),
             CompletedEvent(20, 10, 30));
-        var (provider, _) = CreateProvider(response);
+        var (sut, _) = CreateProvider(response);
 
         var chunks = new List<StreamedChunk>();
-        await foreach (var chunk in provider.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+        await foreach (var chunk in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
             chunks.Add(chunk);
 
         var final = chunks.Last();
-        Assert.NotNull(final.UsageInfo);
-        Assert.Equal(20, final.UsageInfo.InputTokens);
-        Assert.Equal(10, final.UsageInfo.OutputTokens);
-        Assert.Equal(30, final.UsageInfo.TotalTokens);
+        final.UsageInfo.Should().NotBeNull();
+        final.UsageInfo!.InputTokens.Should().Be(20);
+        final.UsageInfo.OutputTokens.Should().Be(10);
+        final.UsageInfo.TotalTokens.Should().Be(30);
     }
 
     [Fact]
@@ -263,13 +326,30 @@ public class OpenRouterChatProviderTests
         {
             Content = new StringContent("", Encoding.UTF8, "text/event-stream")
         };
-        var (provider, _) = CreateProvider(response);
+        var (sut, _) = CreateProvider(response);
 
         var chunks = new List<StreamedChunk>();
-        await foreach (var chunk in provider.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+        await foreach (var chunk in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
             chunks.Add(chunk);
 
-        Assert.Empty(chunks);
+        chunks.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task StreamAsync_DoneSentinel_HandlesGracefully()
+    {
+        var response = CreateStreamResponse(
+            DeltaEvent("Hi"),
+            CompletedEvent(),
+            DoneEvent());
+        var (sut, _) = CreateProvider(response);
+
+        var chunks = new List<StreamedChunk>();
+        await foreach (var chunk in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+            chunks.Add(chunk);
+
+        chunks.Should().HaveCount(2);
+        chunks.Last().IsComplete.Should().BeTrue();
     }
 
     // --- §4: Error Handling ---
@@ -281,11 +361,11 @@ public class OpenRouterChatProviderTests
         {
             Content = new StringContent("{\"error\":\"invalid key\"}")
         });
+        var sut = CreateProviderWithHandler(handler);
 
-        var provider = CreateProviderWithHandler(handler);
+        var act = () => sut.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
 
-        await Assert.ThrowsAsync<ChatAuthenticationException>(
-            () => provider.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken));
+        await act.Should().ThrowAsync<ChatAuthenticationException>();
     }
 
     [Fact]
@@ -295,11 +375,11 @@ public class OpenRouterChatProviderTests
         {
             Content = new StringContent("{\"error\":\"rate limited\"}")
         });
+        var sut = CreateProviderWithHandler(handler);
 
-        var provider = CreateProviderWithHandler(handler);
+        var act = () => sut.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
 
-        await Assert.ThrowsAsync<ChatRateLimitException>(
-            () => provider.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken));
+        await act.Should().ThrowAsync<ChatRateLimitException>();
     }
 
     [Fact]
@@ -309,10 +389,11 @@ public class OpenRouterChatProviderTests
         {
             BaseAddress = new Uri("https://openrouter.ai")
         };
-        var provider = new OpenRouterChatProvider(client);
+        var sut = new OpenRouterChatProvider(client);
 
-        await Assert.ThrowsAsync<ChatTimeoutException>(
-            () => provider.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken));
+        var act = () => sut.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<ChatTimeoutException>();
     }
 
     [Fact]
@@ -322,11 +403,11 @@ public class OpenRouterChatProviderTests
         {
             Content = new StringContent("{\"error\":\"server error\"}")
         });
+        var sut = CreateProviderWithHandler(handler);
 
-        var provider = CreateProviderWithHandler(handler);
+        var act = () => sut.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
 
-        await Assert.ThrowsAsync<ChatProviderException>(
-            () => provider.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken));
+        await act.Should().ThrowAsync<ChatProviderException>();
     }
 
     [Fact]
@@ -336,35 +417,54 @@ public class OpenRouterChatProviderTests
         {
             Content = new StringContent("not json at all", Encoding.UTF8, "application/json")
         });
+        var sut = CreateProviderWithHandler(handler);
 
-        var provider = CreateProviderWithHandler(handler);
+        var act = () => sut.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
 
-        await Assert.ThrowsAsync<ChatDeserializationException>(
-            () => provider.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken));
+        await act.Should().ThrowAsync<ChatDeserializationException>();
+    }
+
+    [Fact]
+    public async Task StreamAsync_ServerError500_ThrowsProviderException()
+    {
+        var handler = new MockHttpHandler(new HttpResponseMessage(HttpStatusCode.InternalServerError)
+        {
+            Content = new StringContent("{\"error\":\"server error\"}")
+        });
+        var sut = CreateProviderWithHandler(handler);
+
+        var act = async () =>
+        {
+            await foreach (var chunk in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+            { }
+        };
+
+        await act.Should().ThrowAsync<ChatProviderException>();
     }
 
     // --- §5: Request Headers ---
+    // Note: These verify that headers configured on HttpClient via DI (DependencyInjection.cs)
+    // survive through to the outgoing request. The provider itself doesn't set headers —
+    // the real production wiring is tested via integration tests.
 
     [Fact]
     public async Task CompleteAsync_AuthorizationHeader_IsSet()
     {
-        var (provider, handler) = CreateProvider(CreateCompletionResponse());
+        var (sut, handler) = CreateProvider(CreateCompletionResponse());
 
-        await provider.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
+        await sut.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
 
-        Assert.Equal("Bearer test-key", handler.LastRequest!.Headers.Authorization?.ToString());
+        handler.LastRequest!.Headers.Authorization?.ToString().Should().Be("Bearer test-key");
     }
 
     [Fact]
     public async Task CompleteAsync_AttributionHeaders_ArePresent()
     {
-        var (provider, handler) = CreateProvider(CreateCompletionResponse());
+        var (sut, handler) = CreateProvider(CreateCompletionResponse());
 
-        await provider.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
+        await sut.CompleteAsync(CreateRequest(), TestContext.Current.CancellationToken);
 
-        Assert.Equal("https://iris.qreedence.com",
-            handler.LastRequest!.Headers.GetValues("HTTP-Referer").First());
-        Assert.Equal("Iris",
-            handler.LastRequest!.Headers.GetValues("X-OpenRouter-Title").First());
+        handler.LastRequest!.Headers.GetValues("HTTP-Referer").First().Should().Be("https://iris.qreedence.com");
+        handler.LastRequest!.Headers.GetValues("X-OpenRouter-Title").First().Should().Be("Iris");
     }
 }
