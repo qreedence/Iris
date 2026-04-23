@@ -92,6 +92,9 @@ public class OpenRouterChatProvider : IChatProvider
     {
         try
         {
+            if (json is "[DONE]")
+                return null;
+
             using var doc = JsonDocument.Parse(json);
             var type = doc.RootElement.GetProperty("type").GetString();
 
