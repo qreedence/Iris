@@ -19,7 +19,7 @@ namespace Iris.Api.Controllers
         [HttpPost]
         [ProducesResponseType<ChatResponse>(200)]
         [ProducesResponseType<ProblemDetails>(500)]
-        public async Task<IActionResult> Complete(ChatRequest request, CancellationToken ct)
+        public async Task<IActionResult> Complete([FromBody] ChatRequest request, CancellationToken ct)
         {
             var response = await _chatProvider.CompleteAsync(request, ct);
             return Ok(response);
