@@ -30,6 +30,7 @@ namespace Iris.Infrastructure
                 client.DefaultRequestHeaders.Add("Authorization", $"Bearer {options.ApiKey}");
                 client.DefaultRequestHeaders.Add("HTTP-Referer", options.AppUrl);
                 client.DefaultRequestHeaders.Add("X-OpenRouter-Title", options.AppTitle);
+                client.Timeout = TimeSpan.FromSeconds(30);
             });
 
             return services;

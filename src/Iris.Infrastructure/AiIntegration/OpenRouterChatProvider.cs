@@ -1,4 +1,5 @@
 ﻿using Iris.Application.AiIntegration;
+using Iris.Application.AiIntegration.Exceptions;
 using Iris.Application.AiIntegration.Models;
 using Iris.Infrastructure.AiIntegration.Models;
 using System.Net.Http.Json;
@@ -25,27 +26,38 @@ public class OpenRouterChatProvider : IChatProvider
 
     public async Task<ChatResponse> CompleteAsync(ChatRequest request, CancellationToken ct = default)
     {
-        var content = JsonContent.Create(MapToOpenRouterRequest(request), options: _jsonOptions);
-       
-        using var response = await _httpClient.PostAsync("/api/v1/responses", content, ct);
-        response.EnsureSuccessStatusCode();
-        var json = await response.Content.ReadAsStringAsync(ct);
+        try
+        {
+            var content = JsonContent.Create(MapToOpenRouterRequest(request), options: _jsonOptions);
+            using var response = await _httpClient.PostAsync("/api/v1/responses", content, ct);
 
-        var orResponse = JsonSerializer.Deserialize<OpenRouterResponse>(json, _jsonOptions)
-            ?? throw new JsonException("Failed to deserialize OpenRouter response");
+            await EnsureSuccessAsync(response, ct);
+            var json = await response.Content.ReadAsStringAsync(ct);
 
-        var usage = orResponse.Usage is { } u
-            ? new UsageInfo(u.InputTokens, u.OutputTokens, u.TotalTokens)
-            : null;
+            var orResponse = JsonSerializer.Deserialize<OpenRouterResponse>(json, _jsonOptions)
+                ?? throw new ChatDeserializationException("Failed to deserialize OpenRouter response");
 
-        var text = orResponse.Output
-               .Where(o => o.Type == "message")
-               .SelectMany(o => o.Content ?? [])
-               .Where(c => c.Type == "output_text")
-               .Select(c => c.Text)
-               .FirstOrDefault() ?? string.Empty;
+            var usage = orResponse.Usage is { } u
+                ? new UsageInfo(u.InputTokens, u.OutputTokens, u.TotalTokens)
+                : null;
 
-        return new ChatResponse(text, usage);
+            var text = orResponse.Output
+                .Where(o => o.Type == "message")
+                .SelectMany(o => o.Content ?? [])
+                .Where(c => c.Type == "output_text")
+                .Select(c => c.Text)
+                .FirstOrDefault() ?? string.Empty;
+
+            return new ChatResponse(text, usage);
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new ChatTimeoutException("OpenRouter request timed out", ex);
+        }
+        catch (JsonException ex)
+        {
+            throw new ChatDeserializationException("Failed to deserialize OpenRouter response", ex);
+        }
     }
 
     public async IAsyncEnumerable<StreamedChunk> StreamAsync(
@@ -59,7 +71,7 @@ public class OpenRouterChatProvider : IChatProvider
             HttpCompletionOption.ResponseHeadersRead,
             ct);
 
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response, ct);
 
         using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);
@@ -70,15 +82,23 @@ public class OpenRouterChatProvider : IChatProvider
             if (string.IsNullOrEmpty(line) || !line.StartsWith("data: "))
                 continue;
 
-            var json = line["data: ".Length..];
+            var chunk = ParseStreamEvent(line["data: ".Length..]);
+            if (chunk is not null)
+                yield return chunk;
+        }
+    }
 
+    private StreamedChunk? ParseStreamEvent(string json)
+    {
+        try
+        {
             using var doc = JsonDocument.Parse(json);
             var type = doc.RootElement.GetProperty("type").GetString();
 
             if (type == "response.output_text.delta")
             {
                 var delta = doc.RootElement.GetProperty("delta").GetString();
-                yield return new StreamedChunk(delta, false, null);
+                return new StreamedChunk(delta, false, null);
             }
             else if (type == "response.completed")
             {
@@ -91,8 +111,14 @@ public class OpenRouterChatProvider : IChatProvider
                         u.GetProperty("output_tokens").GetInt32(),
                         u.GetProperty("total_tokens").GetInt32());
                 }
-                yield return new StreamedChunk(null, true, usage);
+                return new StreamedChunk(null, true, usage);
             }
+
+            return null;
+        }
+        catch (JsonException ex)
+        {
+            throw new ChatDeserializationException("Failed to deserialize OpenRouter stream event", ex);
         }
     }
 
@@ -109,5 +135,24 @@ public class OpenRouterChatProvider : IChatProvider
             TopP: request.ModelParameters?.TopP,
             Stream: stream ? true : null
         );
+    }
+
+    private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        if (response.IsSuccessStatusCode)
+            return;
+
+        var body = await response.Content.ReadAsStringAsync(ct);
+
+        throw response.StatusCode switch
+        {
+            System.Net.HttpStatusCode.Unauthorized =>
+                new ChatAuthenticationException($"OpenRouter authentication failed: {body}"),
+            System.Net.HttpStatusCode.TooManyRequests =>
+                new ChatRateLimitException($"OpenRouter rate limit exceeded: {body}"),
+            System.Net.HttpStatusCode.InternalServerError =>
+                new ChatProviderException($"OpenRouter server error: {body}"),
+            _ => new ChatProviderException($"OpenRouter request failed ({(int)response.StatusCode}): {body}")
+        };
     }
 }
