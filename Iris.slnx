@@ -5,4 +5,7 @@
     <Project Path="src/Iris.Domain/Iris.Domain.csproj" />
     <Project Path="src/Iris.Infrastructure/Iris.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Iris.Tests.Unit/Iris.Tests.Unit.csproj" />
+  </Folder>
 </Solution>
