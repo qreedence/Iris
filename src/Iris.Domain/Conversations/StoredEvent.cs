@@ -6,7 +6,7 @@
         public string EventType { get; set; } = string.Empty;
         public Guid AggregateId { get; set; }
         public string EventData { get; set; } = string.Empty;
-        public DateTimeOffset OccurredAt { get; set; } = DateTimeOffset.UtcNow;
+        public DateTimeOffset OccurredAt { get; set; }
         public Guid CommandId { get; set; }
     }
 }

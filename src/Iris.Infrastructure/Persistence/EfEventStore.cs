@@ -3,6 +3,7 @@ using Iris.Domain.Conversations;
 using Iris.Domain.Conversations.Events;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Iris.Infrastructure.Persistence;
 
@@ -24,7 +25,8 @@ public class EfEventStore : IEventStore
                 AggregateId = aggregateId,
                 CommandId = commandId,
                 EventType = evt.GetType().Name,
-                EventData = JsonSerializer.Serialize(evt, evt.GetType()),
+                EventData = JsonSerializer.Serialize(evt, evt.GetType(), SerializerOptions),
+                OccurredAt = DateTimeOffset.UtcNow,
             });
         }
 
@@ -43,17 +45,25 @@ public class EfEventStore : IEventStore
 
         foreach (var stored in storedEvents)
         {
-            var type = EventTypeMap[stored.EventType];
-            var deserialized = JsonSerializer.Deserialize(stored.EventData, type)
+            if (!EventTypeMap.TryGetValue(stored.EventType, out var type))
+                throw new InvalidOperationException(
+                    $"Unknown event type '{stored.EventType}' (sequence {stored.SequenceNumber}, aggregate {stored.AggregateId})");
+
+            var deserialized = JsonSerializer.Deserialize(stored.EventData, type, SerializerOptions)
                 as ConversationEvent
                 ?? throw new InvalidOperationException(
-                    $"Failed to deserialize event {stored.EventType} (sequence {stored.SequenceNumber})");
+                    $"Failed to deserialize event '{stored.EventType}' (sequence {stored.SequenceNumber}, aggregate {stored.AggregateId})");
 
             events.Add(deserialized);
         }
 
         return events;
     }
+
+    private static readonly JsonSerializerOptions SerializerOptions = new()
+    {
+        Converters = { new JsonStringEnumConverter() },
+    };
 
     private static readonly Dictionary<string, Type> EventTypeMap = new()
     {
