@@ -33,6 +33,8 @@ namespace Iris.Infrastructure
                 client.DefaultRequestHeaders.Add("X-OpenRouter-Title", options.AppTitle);
                 client.Timeout = TimeSpan.FromSeconds(30);
             });
+            
+            services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(DependencyInjection).Assembly));
 
             services.AddScoped<IEventStore, EfEventStore>();
 
