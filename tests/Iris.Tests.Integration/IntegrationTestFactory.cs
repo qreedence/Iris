@@ -36,6 +36,7 @@ public class IntegrationTestFactory : IAsyncLifetime
     {
         var services = new ServiceCollection();
 
+        services.AddLogging();
         services.AddDbContext<AppDbContext>(options =>
             options.UseNpgsql(_dbContainer.GetConnectionString()));
 

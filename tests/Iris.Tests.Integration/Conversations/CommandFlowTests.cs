@@ -5,6 +5,7 @@ using Iris.Application.Conversations.Commands.SendMessage;
 using Iris.Application.Exceptions;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
+using Iris.Infrastructure.Persistence;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 
