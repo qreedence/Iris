@@ -3,6 +3,7 @@ using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Exceptions;
 using Iris.Domain.Conversations.Events;
+using MediatR;
 using NSubstitute;
 
 namespace Iris.Tests.Unit.Conversations;
@@ -10,8 +11,10 @@ namespace Iris.Tests.Unit.Conversations;
 public class CreateConversationHandlerTests
 {
     private readonly IEventStore _eventStore = Substitute.For<IEventStore>();
+    private readonly IPublisher _publisher = Substitute.For<IPublisher>();
 
-    private CreateConversationHandler CreateSut() => new(_eventStore);
+    private CreateConversationHandler CreateSut() => new(_eventStore, _publisher);
+
 
     private static CreateConversationCommand CreateValidCommand(
         Guid? conversationId = null,

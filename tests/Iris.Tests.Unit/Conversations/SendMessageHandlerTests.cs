@@ -1,9 +1,11 @@
 using FluentAssertions;
 using Iris.Application.Conversations;
+using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Commands.SendMessage;
 using Iris.Application.Exceptions;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
+using MediatR;
 using NSubstitute;
 
 namespace Iris.Tests.Unit.Conversations;
@@ -11,8 +13,9 @@ namespace Iris.Tests.Unit.Conversations;
 public class SendMessageHandlerTests
 {
     private readonly IEventStore _eventStore = Substitute.For<IEventStore>();
+    private readonly IPublisher _publisher = Substitute.For<IPublisher>();
 
-    private SendMessageHandler CreateSut() => new(_eventStore);
+    private SendMessageHandler CreateSut() => new(_eventStore, _publisher);
 
     private static SendMessageCommand CreateValidCommand(
         Guid? conversationId = null,
