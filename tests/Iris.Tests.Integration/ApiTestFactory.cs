@@ -1,8 +1,11 @@
+using Iris.Application.AiIntegration;
+using Iris.Application.AiIntegration.Models;
 using Iris.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Testcontainers.PostgreSql;
 
 namespace Iris.Tests.Integration;
@@ -14,6 +17,20 @@ public class ApiTestFactory : WebApplicationFactory<Program>, IAsyncLifetime
         .WithUsername("test")
         .WithPassword("test")
         .Build();
+
+    /// <summary>
+    /// Shared mock IChatProvider. Configure per test via NSubstitute.
+    /// Default: returns "Mock AI response" with 10/5 tokens.
+    /// </summary>
+    public IChatProvider MockChatProvider { get; } = CreateDefaultMockChatProvider();
+
+    private static IChatProvider CreateDefaultMockChatProvider()
+    {
+        var mock = Substitute.For<IChatProvider>();
+        mock.CompleteAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new ChatResponse("Mock AI response", new UsageInfo(10, 5, 15)));
+        return mock;
+    }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -29,6 +46,14 @@ public class ApiTestFactory : WebApplicationFactory<Program>, IAsyncLifetime
             // Add DbContext pointing to Testcontainers PostgreSQL
             services.AddDbContext<AppDbContext>(options =>
                 options.UseNpgsql(_dbContainer.GetConnectionString()));
+
+            // Replace real IChatProvider with mock
+            var chatProviderDescriptor = services.SingleOrDefault(
+                d => d.ServiceType == typeof(IChatProvider));
+            if (chatProviderDescriptor != null)
+                services.Remove(chatProviderDescriptor);
+
+            services.AddSingleton(MockChatProvider);
         });
     }
 
