@@ -33,7 +33,7 @@ namespace Iris.Application.Conversations.Commands.CreateConversation
 
             var conversation = new ConversationCreated(command.ConversationId, command.PersonaId, command.Title);
             await _eventStore.AppendAsync(command.ConversationId, [conversation], Guid.NewGuid(), ct);
-            await _publisher.Publish(new EventNotification<ConversationCreated>(conversation), ct);
+            await _publisher.Publish(new EventNotification<ConversationCreated>(conversation, DateTimeOffset.UtcNow), ct);
             return conversation.ConversationId;
         }
     }

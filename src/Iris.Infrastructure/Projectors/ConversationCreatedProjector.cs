@@ -17,10 +17,13 @@ namespace Iris.Infrastructure.Projectors
 
         public async Task Handle(EventNotification<ConversationCreated> notification, CancellationToken ct)
         {
+            var existing = await _db.ConversationReadModels.FindAsync([notification.Event.ConversationId], ct);
+            if (existing != null) return; // already projected
+
             var conversation = new ConversationReadModel
             {
                 Id = notification.Event.ConversationId,
-                CreatedAt = DateTimeOffset.UtcNow,
+                CreatedAt = notification.OccurredAt,
                 Title = notification.Event.Title,
             };
             _db.ConversationReadModels.Add(conversation);

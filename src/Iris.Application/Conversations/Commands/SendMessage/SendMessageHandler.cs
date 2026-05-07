@@ -28,9 +28,9 @@ namespace Iris.Application.Conversations.Commands.SendMessage
             if (events.Count == 0)
                 throw new NotFoundException("Conversation does not exist.");
             
-            var message = new MessageSent(command.ConversationId, command.Content, command.Role);
+            var message = new MessageSent(Guid.NewGuid(), command.ConversationId, command.Content, command.Role);
             await _eventStore.AppendAsync(command.ConversationId, [message], Guid.NewGuid(), ct);
-            await _publisher.Publish(new EventNotification<MessageSent>(message), ct);
+            await _publisher.Publish(new EventNotification<MessageSent>(message, DateTimeOffset.UtcNow), ct);
             return Unit.Value;
         }
     }

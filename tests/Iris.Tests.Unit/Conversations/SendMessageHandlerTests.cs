@@ -2,6 +2,7 @@ using FluentAssertions;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Commands.SendMessage;
+using Iris.Application.Conversations.Notifications;
 using Iris.Application.Exceptions;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
@@ -64,6 +65,11 @@ public class SendMessageHandlerTests
                 ((MessageSent)events.First()).Role == command.Role),
             Arg.Any<Guid>(),
             Arg.Any<CancellationToken>());
+
+        await _publisher.Received(1).Publish(
+            Arg.Is<EventNotification<MessageSent>>(n =>
+                n.Event.ConversationId == conversationId),
+            Arg.Any<CancellationToken>());
     }
 
     // ── §2 Validation ─────────────────────────────────────────────
@@ -92,6 +98,10 @@ public class SendMessageHandlerTests
             Arg.Any<IEnumerable<ConversationEvent>>(),
             Arg.Any<Guid>(),
             Arg.Any<CancellationToken>());
+
+        await _publisher.DidNotReceive().Publish(
+            Arg.Any<INotification>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -116,6 +126,10 @@ public class SendMessageHandlerTests
             Arg.Any<Guid>(),
             Arg.Any<IEnumerable<ConversationEvent>>(),
             Arg.Any<Guid>(),
+            Arg.Any<CancellationToken>());
+
+        await _publisher.DidNotReceive().Publish(
+            Arg.Any<INotification>(),
             Arg.Any<CancellationToken>());
     }
 

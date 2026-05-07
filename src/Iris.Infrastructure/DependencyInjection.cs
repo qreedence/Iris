@@ -1,5 +1,6 @@
 ﻿using Iris.Application.AiIntegration;
 using Iris.Application.Conversations;
+using Iris.Application.Conversations.Queries;
 using Iris.Infrastructure.AiIntegration;
 using Iris.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -35,7 +36,7 @@ namespace Iris.Infrastructure
             });
             
             services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(DependencyInjection).Assembly));
-
+            services.AddScoped<IConversationQueries, ConversationQueries>();
             services.AddScoped<IEventStore, EfEventStore>();
 
             return services;
