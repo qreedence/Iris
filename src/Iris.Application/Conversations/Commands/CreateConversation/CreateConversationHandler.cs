@@ -1,4 +1,5 @@
-﻿using Iris.Application.Exceptions;
+﻿using Iris.Application.Conversations.Notifications;
+using Iris.Application.Exceptions;
 using Iris.Domain.Conversations.Events;
 using MediatR;
 
@@ -7,9 +8,12 @@ namespace Iris.Application.Conversations.Commands.CreateConversation
     public class CreateConversationHandler : IRequestHandler<CreateConversationCommand, Guid>
     {
         private readonly IEventStore _eventStore;
-        public CreateConversationHandler(IEventStore eventStore)
+        private readonly IPublisher _publisher;
+        
+        public CreateConversationHandler(IEventStore eventStore, IPublisher publisher)
         {
             _eventStore = eventStore;
+            _publisher = publisher;
         }
 
         public async Task<Guid> Handle(CreateConversationCommand command, CancellationToken ct)
@@ -29,6 +33,7 @@ namespace Iris.Application.Conversations.Commands.CreateConversation
 
             var conversation = new ConversationCreated(command.ConversationId, command.PersonaId, command.Title);
             await _eventStore.AppendAsync(command.ConversationId, [conversation], Guid.NewGuid(), ct);
+            await _publisher.Publish(new EventNotification<ConversationCreated>(conversation), ct);
             return conversation.ConversationId;
         }
     }
