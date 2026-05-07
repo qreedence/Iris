@@ -4,7 +4,7 @@ using Iris.Domain.Conversations.Events;
 using Iris.Infrastructure.Persistence;
 using MediatR;
 
-namespace Iris.Application.Conversations.Projectors
+namespace Iris.Infrastructure.Projectors
 {
     public class ConversationCreatedProjector : INotificationHandler<EventNotification<ConversationCreated>>
     {

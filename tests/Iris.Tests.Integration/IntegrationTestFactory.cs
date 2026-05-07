@@ -1,5 +1,6 @@
 using Iris.Application;
 using Iris.Application.Conversations;
+using Iris.Infrastructure;
 using Iris.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -41,6 +42,7 @@ public class IntegrationTestFactory : IAsyncLifetime
             options.UseNpgsql(_dbContainer.GetConnectionString()));
 
         services.AddApplication();
+        services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(EfEventStore).Assembly));
         services.AddScoped<IEventStore, EfEventStore>();
 
         return services.BuildServiceProvider();

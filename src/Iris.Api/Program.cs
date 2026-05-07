@@ -42,3 +42,6 @@ app.UseCors("AllowFrontend");
 app.MapControllers();
 app.MapHealthChecks("/health");
 app.Run();
+
+// Make the auto-generated Program class visible to integration tests
+public partial class Program { }
