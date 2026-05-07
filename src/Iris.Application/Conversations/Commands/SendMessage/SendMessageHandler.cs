@@ -1,4 +1,5 @@
-﻿using Iris.Application.Exceptions;
+﻿using Iris.Application.Conversations.Notifications;
+using Iris.Application.Exceptions;
 using Iris.Domain.Conversations.Events;
 using MediatR;
 
@@ -7,10 +8,12 @@ namespace Iris.Application.Conversations.Commands.SendMessage
     public class SendMessageHandler : IRequestHandler<SendMessageCommand, Unit>
     {
         private readonly IEventStore _eventStore;
+        private readonly IPublisher _publisher;
         
-        public SendMessageHandler(IEventStore eventStore)
+        public SendMessageHandler(IEventStore eventStore, IPublisher publisher)
         {
             _eventStore = eventStore;
+            _publisher = publisher;
         }
 
         public async Task<Unit> Handle(SendMessageCommand command, CancellationToken ct)
@@ -25,8 +28,9 @@ namespace Iris.Application.Conversations.Commands.SendMessage
             if (events.Count == 0)
                 throw new NotFoundException("Conversation does not exist.");
             
-            var message = new MessageSent(command.ConversationId, command.Content, command.Role);
+            var message = new MessageSent(Guid.NewGuid(), command.ConversationId, command.Content, command.Role);
             await _eventStore.AppendAsync(command.ConversationId, [message], Guid.NewGuid(), ct);
+            await _publisher.Publish(new EventNotification<MessageSent>(message, DateTimeOffset.UtcNow), ct);
             return Unit.Value;
         }
     }

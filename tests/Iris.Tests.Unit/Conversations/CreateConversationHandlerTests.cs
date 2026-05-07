@@ -1,8 +1,10 @@
 using FluentAssertions;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
+using Iris.Application.Conversations.Notifications;
 using Iris.Application.Exceptions;
 using Iris.Domain.Conversations.Events;
+using MediatR;
 using NSubstitute;
 
 namespace Iris.Tests.Unit.Conversations;
@@ -10,8 +12,10 @@ namespace Iris.Tests.Unit.Conversations;
 public class CreateConversationHandlerTests
 {
     private readonly IEventStore _eventStore = Substitute.For<IEventStore>();
+    private readonly IPublisher _publisher = Substitute.For<IPublisher>();
 
-    private CreateConversationHandler CreateSut() => new(_eventStore);
+    private CreateConversationHandler CreateSut() => new(_eventStore, _publisher);
+
 
     private static CreateConversationCommand CreateValidCommand(
         Guid? conversationId = null,
@@ -46,6 +50,11 @@ public class CreateConversationHandlerTests
                 ((ConversationCreated)events.First()).Title == command.Title),
             Arg.Any<Guid>(),
             Arg.Any<CancellationToken>());
+
+        await _publisher.Received(1).Publish(
+            Arg.Is<EventNotification<ConversationCreated>>(n =>
+                n.Event.ConversationId == command.ConversationId),
+            Arg.Any<CancellationToken>());
     }
 
     // ── §2 Validation ─────────────────────────────────────────────
@@ -72,6 +81,10 @@ public class CreateConversationHandlerTests
             Arg.Any<IEnumerable<ConversationEvent>>(),
             Arg.Any<Guid>(),
             Arg.Any<CancellationToken>());
+
+        await _publisher.DidNotReceive().Publish(
+            Arg.Any<INotification>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -93,6 +106,10 @@ public class CreateConversationHandlerTests
             Arg.Any<IEnumerable<ConversationEvent>>(),
             Arg.Any<Guid>(),
             Arg.Any<CancellationToken>());
+
+        await _publisher.DidNotReceive().Publish(
+            Arg.Any<INotification>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -113,6 +130,10 @@ public class CreateConversationHandlerTests
             Arg.Any<Guid>(),
             Arg.Any<IEnumerable<ConversationEvent>>(),
             Arg.Any<Guid>(),
+            Arg.Any<CancellationToken>());
+
+        await _publisher.DidNotReceive().Publish(
+            Arg.Any<INotification>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -141,6 +162,10 @@ public class CreateConversationHandlerTests
             Arg.Any<Guid>(),
             Arg.Any<IEnumerable<ConversationEvent>>(),
             Arg.Any<Guid>(),
+            Arg.Any<CancellationToken>());
+
+        await _publisher.DidNotReceive().Publish(
+            Arg.Any<INotification>(),
             Arg.Any<CancellationToken>());
     }
 

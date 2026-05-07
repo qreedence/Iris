@@ -1,5 +1,6 @@
 ﻿using Iris.Application.AiIntegration;
 using Iris.Application.Conversations;
+using Iris.Application.Conversations.Queries;
 using Iris.Infrastructure.AiIntegration;
 using Iris.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -33,7 +34,9 @@ namespace Iris.Infrastructure
                 client.DefaultRequestHeaders.Add("X-OpenRouter-Title", options.AppTitle);
                 client.Timeout = TimeSpan.FromSeconds(30);
             });
-
+            
+            services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(DependencyInjection).Assembly));
+            services.AddScoped<IConversationQueries, ConversationQueries>();
             services.AddScoped<IEventStore, EfEventStore>();
 
             return services;
