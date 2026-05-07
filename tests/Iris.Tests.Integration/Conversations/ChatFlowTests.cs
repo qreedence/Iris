@@ -3,7 +3,6 @@ using Iris.Application.AiIntegration;
 using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations.Commands.Chat;
 using Iris.Application.Conversations.Commands.CreateConversation;
-using Iris.Application.Conversations.Commands.SendMessage;
 using Iris.Application.Exceptions;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
@@ -47,12 +46,11 @@ public class ChatFlowTests : IClassFixture<IntegrationTestFactory>
         // Arrange
         var conversationId = Guid.NewGuid();
         await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Chat"));
-        await SendCommand(new SendMessageCommand(conversationId, "Hello!", ChatRole.User));
 
-        // Act
+        // Act — single call handles user message + AI response
         await SendCommand(new ChatCommand(conversationId, "Hello!", "test/model"));
 
-        // Assert
+        // Assert — ConversationCreated + MessageSent + AssistantResponseCompleted + TurnCompleted
         var stream = await LoadStream(conversationId);
 
         stream.Should().HaveCount(4);
@@ -70,7 +68,6 @@ public class ChatFlowTests : IClassFixture<IntegrationTestFactory>
         // Arrange
         var conversationId = Guid.NewGuid();
         await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Chat"));
-        await SendCommand(new SendMessageCommand(conversationId, "Hi there", ChatRole.User));
 
         // Act
         await SendCommand(new ChatCommand(conversationId, "Hi there", "test/model"));
@@ -101,17 +98,13 @@ public class ChatFlowTests : IClassFixture<IntegrationTestFactory>
         var conversationId = Guid.NewGuid();
         await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Chat"));
 
-        // Turn 1: user message + AI response
-        await SendCommand(new SendMessageCommand(conversationId, "First question", ChatRole.User));
+        // Turn 1
         await SendCommand(new ChatCommand(conversationId, "First question", "test/model"));
 
-        // Turn 2: user message + AI response
-        await SendCommand(new SendMessageCommand(conversationId, "Follow-up", ChatRole.User));
-
-        // Act
+        // Act — Turn 2
         await SendCommand(new ChatCommand(conversationId, "Follow-up", "test/model"));
 
-        // Assert — the second chat request should include full history
+        // Assert — second call should have full history: user1, assistant1, user2
         capturedRequest.Should().NotBeNull();
         capturedRequest!.Messages.Should().HaveCount(3);
         capturedRequest.Messages[0].Role.Should().Be(ChatRole.User);
@@ -130,7 +123,6 @@ public class ChatFlowTests : IClassFixture<IntegrationTestFactory>
         // Arrange
         var conversationId = Guid.NewGuid();
         await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Chat"));
-        await SendCommand(new SendMessageCommand(conversationId, "Hello", ChatRole.User));
 
         // Act
         await SendCommand(new ChatCommand(conversationId, "Hello", "test/model"));
@@ -166,7 +158,6 @@ public class ChatFlowTests : IClassFixture<IntegrationTestFactory>
 
         var conversationId = Guid.NewGuid();
         await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Chat"));
-        await SendCommand(new SendMessageCommand(conversationId, "Count my tokens", ChatRole.User));
 
         // Act
         await SendCommand(new ChatCommand(conversationId, "Count my tokens", "test/model"));

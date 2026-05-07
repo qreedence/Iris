@@ -1,5 +1,7 @@
 using Iris.Application;
+using Iris.Application.Exceptions;
 using Iris.Infrastructure;
+using Microsoft.AspNetCore.Diagnostics;
 using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -29,7 +31,30 @@ builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
-app.UseExceptionHandler();
+app.UseExceptionHandler(appBuilder =>
+{
+    appBuilder.Run(async context =>
+    {
+        var exception = context.Features.Get<IExceptionHandlerFeature>()?.Error;
+
+        var (statusCode, title) = exception switch
+        {
+            ValidationException => (StatusCodes.Status400BadRequest, "Validation Error"),
+            NotFoundException => (StatusCodes.Status404NotFound, "Not Found"),
+            _ => (StatusCodes.Status500InternalServerError, "Internal Server Error")
+        };
+
+        context.Response.StatusCode = statusCode;
+        context.Response.ContentType = "application/problem+json";
+
+        await context.Response.WriteAsJsonAsync(new
+        {
+            status = statusCode,
+            title,
+            detail = exception?.Message
+        });
+    });
+});
 app.UseStatusCodePages();
 
 if (app.Environment.IsDevelopment())

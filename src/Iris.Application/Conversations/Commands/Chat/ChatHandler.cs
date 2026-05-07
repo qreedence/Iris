@@ -46,6 +46,10 @@ namespace Iris.Application.Conversations.Commands.Chat
             if (events.Count == 0)
                 throw new NotFoundException("Conversation does not exist.");
 
+            var userMessage = new MessageSent(Guid.NewGuid(), command.ConversationId, command.UserMessage, ChatRole.User);
+            await _eventStore.AppendAsync(command.ConversationId, [userMessage], Guid.NewGuid(), ct);
+            await _publisher.Publish(new EventNotification<MessageSent>(userMessage, DateTimeOffset.UtcNow), ct);
+
             var conversationHistory = new List<ChatMessage>();
 
             foreach (var evt in events)
@@ -55,6 +59,8 @@ namespace Iris.Application.Conversations.Commands.Chat
                 else if (evt is AssistantResponseCompleted resp)
                     conversationHistory.Add(new ChatMessage(ChatRole.Assistant, resp.Content));
             }
+            conversationHistory.Add(new ChatMessage(ChatRole.User, command.UserMessage));
+
             var chatRequest = new ChatRequest(Model: command.Model, Messages: conversationHistory, SystemPrompt: command.SystemPrompt, ModelParameters: command.ModelParameters);
             var result = await _chatProvider.CompleteAsync(chatRequest, ct); 
 

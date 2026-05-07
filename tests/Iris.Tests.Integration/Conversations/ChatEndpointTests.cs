@@ -7,8 +7,6 @@ using Iris.Application.AiIntegration;
 using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations.Commands.Chat;
 using Iris.Application.Conversations.Commands.CreateConversation;
-using Iris.Application.Conversations.Commands.SendMessage;
-using Iris.Domain.AiIntegration;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
@@ -53,17 +51,17 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         // Arrange
         var conversationId = Guid.NewGuid();
         await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Chat"));
-        await SendCommand(new SendMessageCommand(conversationId, "Hello!", ChatRole.User));
 
-        // Act
+        // Act — single call, handler persists user message + calls AI
         var response = await _client.PostAsJsonAsync(
             $"/api/conversations/{conversationId}/chat",
-            CreateChatRequest());
+            CreateChatRequest(),
+            TestContext.Current.CancellationToken);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var chatResponse = await response.Content.ReadFromJsonAsync<ChatResponse>(JsonOptions);
+        var chatResponse = await response.Content.ReadFromJsonAsync<ChatResponse>(JsonOptions, TestContext.Current.CancellationToken);
         chatResponse.Should().NotBeNull();
         chatResponse!.Content.Should().NotBeNullOrEmpty();
     }
@@ -76,7 +74,8 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         // Act
         var response = await _client.PostAsJsonAsync(
             $"/api/conversations/{Guid.NewGuid()}/chat",
-            CreateChatRequest());
+            CreateChatRequest(),
+            TestContext.Current.CancellationToken);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
@@ -93,14 +92,14 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
 
         var conversationId = Guid.NewGuid();
         await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Chat"));
-        await SendCommand(new SendMessageCommand(conversationId, "Hello!", ChatRole.User));
 
         // Act
         var response = await _client.PostAsJsonAsync(
             $"/api/conversations/{conversationId}/chat",
-            CreateChatRequest());
+            CreateChatRequest(),
+            TestContext.Current.CancellationToken);
 
-        var chatResponse = await response.Content.ReadFromJsonAsync<ChatResponse>(JsonOptions);
+        var chatResponse = await response.Content.ReadFromJsonAsync<ChatResponse>(JsonOptions, TestContext.Current.CancellationToken);
 
         // Assert
         chatResponse.Should().NotBeNull();
@@ -127,18 +126,16 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Chat"));
 
         // Turn 1
-        await SendCommand(new SendMessageCommand(conversationId, "First question", ChatRole.User));
         await _client.PostAsJsonAsync(
             $"/api/conversations/{conversationId}/chat",
-            CreateChatRequest("First question"));
+            CreateChatRequest("First question"),
+            TestContext.Current.CancellationToken);
 
-        // Turn 2
-        await SendCommand(new SendMessageCommand(conversationId, "Follow-up", ChatRole.User));
-
-        // Act
+        // Act — Turn 2
         await _client.PostAsJsonAsync(
             $"/api/conversations/{conversationId}/chat",
-            CreateChatRequest("Follow-up"));
+            CreateChatRequest("Follow-up"),
+            TestContext.Current.CancellationToken);
 
         // Assert — second call should have full history
         capturedRequest.Should().NotBeNull();

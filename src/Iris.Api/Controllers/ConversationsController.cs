@@ -53,21 +53,14 @@ public class ConversationsController : ControllerBase
         [FromBody] ChatRequestDto request,
         CancellationToken ct = default)
     {
-        try
-        {
-            var command = new ChatCommand(
-                id,
-                request.UserMessage,
-                request.Model,
-                request.SystemPrompt,
-                request.ModelParameters);
+        var command = new ChatCommand(
+            id,
+            request.UserMessage,
+            request.Model,
+            request.SystemPrompt,
+            request.ModelParameters);
 
-            var response = await _mediator.Send(command, ct);
-            return Ok(response);
-        }
-        catch (NotFoundException)
-        {
-            return NotFound();
-        }
+        var response = await _mediator.Send(command, ct);
+        return Ok(response);
     }
 }

@@ -68,6 +68,36 @@ public class ChatHandlerTests
         await _eventStore.Received(1).LoadStreamAsync(conversationId, Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task Handle_ValidRequest_PersistsUserMessage()
+    {
+        // Arrange
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        var command = CreateValidCommand(conversationId: conversationId, userMessage: "My question");
+        SetupExistingConversation(conversationId);
+        SetupChatProviderResponse();
+
+        // Act
+        await sut.Handle(command, CancellationToken.None);
+
+        // Assert — user message persisted to event store
+        await _eventStore.Received().AppendAsync(
+            conversationId,
+            Arg.Is<IEnumerable<ConversationEvent>>(events =>
+                events.Any(e => e.GetType() == typeof(MessageSent) &&
+                    ((MessageSent)e).Content == "My question" &&
+                    ((MessageSent)e).Role == ChatRole.User)),
+            Arg.Any<Guid>(),
+            Arg.Any<CancellationToken>());
+
+        // Assert — notification published
+        await _publisher.Received(1).Publish(
+            Arg.Is<EventNotification<MessageSent>>(n =>
+                n.Event.Content == "My question"),
+            Arg.Any<CancellationToken>());
+    }
+
     // ── §2 ChatRequest Construction ───────────────────────────────
 
     [Fact]
@@ -88,16 +118,18 @@ public class ChatHandlerTests
         // Act
         await sut.Handle(command, CancellationToken.None);
 
-        // Assert — verify ChatRequest sent to provider has messages in order
+        // Assert — verify ChatRequest has history + new message in order
         await _chatProvider.Received(1).CompleteAsync(
             Arg.Is<ChatRequest>(r =>
-                r.Messages.Count == 3 &&
+                r.Messages.Count == 4 &&
                 r.Messages[0].Role == ChatRole.User &&
                 r.Messages[0].Content == "First user message" &&
                 r.Messages[1].Role == ChatRole.Assistant &&
                 r.Messages[1].Content == "First AI response" &&
                 r.Messages[2].Role == ChatRole.User &&
-                r.Messages[2].Content == "Second user message"),
+                r.Messages[2].Content == "Second user message" &&
+                r.Messages[3].Role == ChatRole.User &&
+                r.Messages[3].Content == "Hello!"),
             Arg.Any<CancellationToken>());
     }
 
@@ -209,14 +241,13 @@ public class ChatHandlerTests
         // Assert
         await act.Should().ThrowAsync<Exception>();
 
-        await _eventStore.DidNotReceive().AppendAsync(
-            Arg.Any<Guid>(),
-            Arg.Any<IEnumerable<ConversationEvent>>(),
-            Arg.Any<Guid>(),
+        // User message IS persisted (before AI call), but no AI-related events
+        await _publisher.DidNotReceive().Publish(
+            Arg.Is<EventNotification<AssistantResponseCompleted>>(n => true),
             Arg.Any<CancellationToken>());
 
         await _publisher.DidNotReceive().Publish(
-            Arg.Any<INotification>(),
+            Arg.Is<EventNotification<TurnCompleted>>(n => true),
             Arg.Any<CancellationToken>());
     }
 
