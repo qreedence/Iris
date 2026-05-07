@@ -55,7 +55,7 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
         {
             new ConversationCreated(aggregateId, Guid.NewGuid(), "Chat"),
             new MessageSent(Guid.NewGuid(), aggregateId, "Hello", ChatRole.User),
-            new AssistantResponseCompleted(aggregateId, "Hi there!", "test/model"),
+            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, "Hi there!", "test/model"),
         };
 
         // Act
@@ -90,7 +90,7 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
 
         await sut.AppendAsync(aggregateId, [
             new MessageSent(Guid.NewGuid(), aggregateId, "Hello", ChatRole.User),
-            new AssistantResponseCompleted(aggregateId, "Hi!", "test/model"),
+            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, "Hi!", "test/model"),
         ], Guid.NewGuid(), TestContext.Current.CancellationToken);
 
         // Act — use a fresh context to ensure we're reading from DB
@@ -197,7 +197,7 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
         {
             new ConversationCreated(aggregateId, personaId, "My Chat"),
             new MessageSent(Guid.NewGuid(), aggregateId, "What is the meaning of life?", ChatRole.User),
-            new AssistantResponseCompleted(aggregateId, "42, obviously.", "anthropic/claude-sonnet-4"),
+            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, "42, obviously.", "anthropic/claude-sonnet-4"),
             new TurnCompleted(aggregateId, 150, 42),
             new ConversationArchived(aggregateId),
         };
@@ -250,7 +250,7 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
         ], Guid.NewGuid(), TestContext.Current.CancellationToken);
 
         await sut.AppendAsync(aggregateId, [
-            new AssistantResponseCompleted(aggregateId, "Hi!", "test/model"),
+            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, "Hi!", "test/model"),
             new TurnCompleted(aggregateId, 10, 5),
         ], Guid.NewGuid(), TestContext.Current.CancellationToken);
 

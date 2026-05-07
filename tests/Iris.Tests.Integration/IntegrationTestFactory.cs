@@ -1,9 +1,12 @@
 using Iris.Application;
+using Iris.Application.AiIntegration;
+using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations;
 using Iris.Infrastructure;
 using Iris.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Testcontainers.PostgreSql;
 
 namespace Iris.Tests.Integration;
@@ -15,6 +18,20 @@ public class IntegrationTestFactory : IAsyncLifetime
         .WithUsername("test")
         .WithPassword("test")
         .Build();
+
+    /// <summary>
+    /// Shared mock IChatProvider. Configure per test via NSubstitute.
+    /// Default: returns "Mock AI response" with 10/5 tokens.
+    /// </summary>
+    public IChatProvider MockChatProvider { get; } = CreateDefaultMockChatProvider();
+
+    private static IChatProvider CreateDefaultMockChatProvider()
+    {
+        var mock = Substitute.For<IChatProvider>();
+        mock.CompleteAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new ChatResponse("Mock AI response", new UsageInfo(10, 5, 15)));
+        return mock;
+    }
 
     /// <summary>
     /// Creates a raw DbContext for direct database queries and verification.
@@ -44,6 +61,7 @@ public class IntegrationTestFactory : IAsyncLifetime
         services.AddApplication();
         services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(EfEventStore).Assembly));
         services.AddScoped<IEventStore, EfEventStore>();
+        services.AddSingleton(MockChatProvider);
 
         return services.BuildServiceProvider();
     }

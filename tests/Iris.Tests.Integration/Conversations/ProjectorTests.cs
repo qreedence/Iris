@@ -2,7 +2,6 @@ using FluentAssertions;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Commands.SendMessage;
 using Iris.Domain.AiIntegration;
-using Iris.Domain.Conversations.Entities;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -41,7 +40,7 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
         // Assert
         await using var db = _factory.CreateDbContext();
         var readModel = await db.ConversationReadModels
-            .FirstOrDefaultAsync(c => c.Id == conversationId);
+            .FirstOrDefaultAsync(c => c.Id == conversationId, TestContext.Current.CancellationToken);
 
         readModel.Should().NotBeNull();
         readModel!.Title.Should().Be("Projected Chat");
@@ -65,7 +64,7 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
         // Assert
         await using var db = _factory.CreateDbContext();
         var message = await db.ConversationMessages
-            .FirstOrDefaultAsync(m => m.ConversationId == conversationId);
+            .FirstOrDefaultAsync(m => m.ConversationId == conversationId, TestContext.Current.CancellationToken);
 
         message.Should().NotBeNull();
         message!.ConversationId.Should().Be(conversationId);
@@ -89,7 +88,7 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
         // Assert
         await using var db = _factory.CreateDbContext();
         var readModel = await db.ConversationReadModels
-            .FirstOrDefaultAsync(c => c.Id == conversationId);
+            .FirstOrDefaultAsync(c => c.Id == conversationId, TestContext.Current.CancellationToken);
 
         readModel.Should().NotBeNull();
         readModel!.MessageCount.Should().Be(1);
@@ -114,12 +113,10 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
         // Assert
         await using var db = _factory.CreateDbContext();
         var readModel = await db.ConversationReadModels
-            .FirstOrDefaultAsync(c => c.Id == conversationId);
+            .FirstOrDefaultAsync(c => c.Id == conversationId, TestContext.Current.CancellationToken);
 
         readModel.Should().NotBeNull();
         readModel!.MessageCount.Should().Be(3);
-
-        // LastMessageAt should be close to now (the third message)
         readModel.LastMessageAt.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5));
     }
 
@@ -143,14 +140,14 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
         // Assert
         await using var db = _factory.CreateDbContext();
 
-        var readModelA = await db.ConversationReadModels.FirstAsync(c => c.Id == conversationA);
-        var readModelB = await db.ConversationReadModels.FirstAsync(c => c.Id == conversationB);
+        var readModelA = await db.ConversationReadModels.FirstAsync(c => c.Id == conversationA, TestContext.Current.CancellationToken);
+        var readModelB = await db.ConversationReadModels.FirstAsync(c => c.Id == conversationB, TestContext.Current.CancellationToken);
 
         readModelA.MessageCount.Should().Be(2);
         readModelB.MessageCount.Should().Be(1);
 
-        var messagesA = await db.ConversationMessages.Where(m => m.ConversationId == conversationA).ToListAsync();
-        var messagesB = await db.ConversationMessages.Where(m => m.ConversationId == conversationB).ToListAsync();
+        var messagesA = await db.ConversationMessages.Where(m => m.ConversationId == conversationA).ToListAsync(TestContext.Current.CancellationToken);
+        var messagesB = await db.ConversationMessages.Where(m => m.ConversationId == conversationB).ToListAsync(TestContext.Current.CancellationToken);
 
         messagesA.Should().HaveCount(2);
         messagesB.Should().HaveCount(1);
@@ -175,7 +172,7 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
         var messages = await db.ConversationMessages
             .Where(m => m.ConversationId == conversationId)
             .OrderBy(m => m.CreatedAt)
-            .ToListAsync();
+            .ToListAsync(TestContext.Current.CancellationToken);
 
         messages.Should().HaveCount(3);
         messages[0].Content.Should().Be("First");

@@ -29,9 +29,6 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         _client = factory.CreateClient();
     }
 
-    /// <summary>
-    /// Seeds data by dispatching commands through MediatR — the same path as production.
-    /// </summary>
     private async Task SendCommand<TResponse>(IRequest<TResponse> command)
     {
         using var scope = _factory.Services.CreateScope();
@@ -45,16 +42,15 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     public async Task GetConversations_NoConversations_ReturnsEmptyList()
     {
         // Act
-        var response = await _client.GetAsync("/api/conversations");
+        var response = await _client.GetAsync("/api/conversations", TestContext.Current.CancellationToken);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var conversations = await response.Content
-            .ReadFromJsonAsync<List<ConversationSummaryDto>>(JsonOptions);
+            .ReadFromJsonAsync<List<ConversationSummaryDto>>(JsonOptions, TestContext.Current.CancellationToken);
 
         conversations.Should().NotBeNull();
-        // May contain conversations from other tests (shared DB), but response is valid
     }
 
     // ── §2 GET /api/conversations — after creating ────────────────
@@ -69,13 +65,13 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         await SendCommand(new CreateConversationCommand(id2, Guid.NewGuid(), "Chat Two"));
 
         // Act
-        var response = await _client.GetAsync("/api/conversations");
+        var response = await _client.GetAsync("/api/conversations", TestContext.Current.CancellationToken);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var conversations = await response.Content
-            .ReadFromJsonAsync<List<ConversationSummaryDto>>(JsonOptions);
+            .ReadFromJsonAsync<List<ConversationSummaryDto>>(JsonOptions, TestContext.Current.CancellationToken);
 
         conversations.Should().NotBeNull();
         conversations.Should().Contain(c => c.Id == id1 && c.Title == "Chat One");
@@ -93,9 +89,9 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         await SendCommand(new SendMessageCommand(conversationId, "Hello", ChatRole.User));
 
         // Act
-        var response = await _client.GetAsync("/api/conversations");
+        var response = await _client.GetAsync("/api/conversations", TestContext.Current.CancellationToken);
         var conversations = await response.Content
-            .ReadFromJsonAsync<List<ConversationSummaryDto>>(JsonOptions);
+            .ReadFromJsonAsync<List<ConversationSummaryDto>>(JsonOptions, TestContext.Current.CancellationToken);
 
         // Assert
         var conversation = conversations!.First(c => c.Id == conversationId);
@@ -119,13 +115,13 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         await SendCommand(new SendMessageCommand(conversationId, "Third", ChatRole.User));
 
         // Act
-        var response = await _client.GetAsync($"/api/conversations/{conversationId}/messages");
+        var response = await _client.GetAsync($"/api/conversations/{conversationId}/messages", TestContext.Current.CancellationToken);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var messages = await response.Content
-            .ReadFromJsonAsync<List<ConversationMessageDto>>(JsonOptions);
+            .ReadFromJsonAsync<List<ConversationMessageDto>>(JsonOptions, TestContext.Current.CancellationToken);
 
         messages.Should().HaveCount(3);
         messages![0].Content.Should().Be("First");
@@ -139,7 +135,7 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     public async Task GetMessages_NonExistentConversation_Returns404()
     {
         // Act
-        var response = await _client.GetAsync($"/api/conversations/{Guid.NewGuid()}/messages");
+        var response = await _client.GetAsync($"/api/conversations/{Guid.NewGuid()}/messages", TestContext.Current.CancellationToken);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
@@ -156,9 +152,9 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         await SendCommand(new SendMessageCommand(conversationId, "Hello!", ChatRole.User));
 
         // Act
-        var response = await _client.GetAsync($"/api/conversations/{conversationId}/messages");
+        var response = await _client.GetAsync($"/api/conversations/{conversationId}/messages", TestContext.Current.CancellationToken);
         var messages = await response.Content
-            .ReadFromJsonAsync<List<ConversationMessageDto>>(JsonOptions);
+            .ReadFromJsonAsync<List<ConversationMessageDto>>(JsonOptions, TestContext.Current.CancellationToken);
 
         // Assert
         var message = messages!.First();
@@ -186,9 +182,9 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         await SendCommand(new SendMessageCommand(conversationB, "Message B", ChatRole.User));
 
         // Act
-        var response = await _client.GetAsync($"/api/conversations/{conversationA}/messages");
+        var response = await _client.GetAsync($"/api/conversations/{conversationA}/messages", TestContext.Current.CancellationToken);
         var messages = await response.Content
-            .ReadFromJsonAsync<List<ConversationMessageDto>>(JsonOptions);
+            .ReadFromJsonAsync<List<ConversationMessageDto>>(JsonOptions, TestContext.Current.CancellationToken);
 
         // Assert
         messages.Should().HaveCount(1);

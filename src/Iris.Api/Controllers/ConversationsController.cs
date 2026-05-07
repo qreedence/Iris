@@ -1,4 +1,8 @@
+using Iris.Application.AiIntegration.Models;
+using Iris.Application.Conversations.Commands.Chat;
 using Iris.Application.Conversations.Queries;
+using Iris.Application.Exceptions;
+using MediatR;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Iris.Api.Controllers;
@@ -8,10 +12,12 @@ namespace Iris.Api.Controllers;
 public class ConversationsController : ControllerBase
 {
     private readonly IConversationQueries _conversationQueries;
+    private readonly IMediator _mediator;
 
-    public ConversationsController(IConversationQueries conversationQueries)
+    public ConversationsController(IConversationQueries conversationQueries, IMediator mediator)
     {
         _conversationQueries = conversationQueries;
+        _mediator = mediator;
     }
 
     [HttpGet]
@@ -37,5 +43,24 @@ public class ConversationsController : ControllerBase
         var messages = await _conversationQueries.GetMessagesAsync(id, skip, take, ct);
         if (messages == null) return NotFound();
         return Ok(messages);
+    }
+
+    [HttpPost("{id:guid}/chat")]
+    [ProducesResponseType<ChatResponse>(200)]
+    [ProducesResponseType<ProblemDetails>(404)]
+    public async Task<IActionResult> Chat(
+        Guid id,
+        [FromBody] ChatRequestDto request,
+        CancellationToken ct = default)
+    {
+        var command = new ChatCommand(
+            id,
+            request.UserMessage,
+            request.Model,
+            request.SystemPrompt,
+            request.ModelParameters);
+
+        var response = await _mediator.Send(command, ct);
+        return Ok(response);
     }
 }
