@@ -116,6 +116,34 @@ public class CreateConversationHandlerTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task Handle_ConversationAlreadyExists_ThrowsValidationException()
+    {
+        // Arrange
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        var command = CreateValidCommand(conversationId: conversationId);
+
+        _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
+            .Returns(new List<ConversationEvent>
+            {
+                new ConversationCreated(conversationId, Guid.NewGuid(), "Already Exists")
+            });
+
+        // Act
+        var act = () => sut.Handle(command, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<ValidationException>()
+            .WithMessage("*already exists*");
+
+        await _eventStore.DidNotReceive().AppendAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<IEnumerable<ConversationEvent>>(),
+            Arg.Any<Guid>(),
+            Arg.Any<CancellationToken>());
+    }
+
     // ── §3 Event Store Interaction ────────────────────────────────
 
     [Fact]

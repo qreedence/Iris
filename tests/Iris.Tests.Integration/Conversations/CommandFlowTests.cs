@@ -147,7 +147,28 @@ public class CommandFlowTests : IClassFixture<IntegrationTestFactory>
         streamB.Should().AllSatisfy(e => e.ConversationId.Should().Be(conversationB));
     }
 
-    // ── §5 Validation through MediatR ─────────────────────────────
+    // ── §5 Duplicate creation guard ─────────────────────────────────
+
+    [Fact]
+    public async Task CreateConversation_DuplicateId_ThrowsValidationException()
+    {
+        // Arrange
+        var conversationId = Guid.NewGuid();
+        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "First"));
+
+        // Act — same ID again
+        var act = () => SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Duplicate"));
+
+        // Assert
+        await act.Should().ThrowAsync<ValidationException>()
+            .WithMessage("*already exists*");
+
+        // Verify only the original event is in the stream
+        var stream = await LoadStream(conversationId);
+        stream.Should().HaveCount(1);
+    }
+
+    // ── §6 Validation through MediatR ─────────────────────────────
 
     [Fact]
     public async Task SendMessage_ToNonExistentConversation_ThrowsNotFoundException()
