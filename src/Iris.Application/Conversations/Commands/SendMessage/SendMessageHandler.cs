@@ -4,7 +4,7 @@ using MediatR;
 
 namespace Iris.Application.Conversations.Commands.SendMessage
 {
-    public class SendMessageHandler : IRequestHandler<SendMessageCommand, Guid>
+    public class SendMessageHandler : IRequestHandler<SendMessageCommand, Unit>
     {
         private readonly IEventStore _eventStore;
         
@@ -13,7 +13,7 @@ namespace Iris.Application.Conversations.Commands.SendMessage
             _eventStore = eventStore;
         }
 
-        public async Task<Guid> Handle(SendMessageCommand command, CancellationToken ct)
+        public async Task<Unit> Handle(SendMessageCommand command, CancellationToken ct)
         {
             if (command.ConversationId == Guid.Empty)
             {
@@ -30,7 +30,7 @@ namespace Iris.Application.Conversations.Commands.SendMessage
             }
             var message = new MessageSent(command.ConversationId, command.Content, command.Role);
             await _eventStore.AppendAsync(command.ConversationId, [message], Guid.NewGuid(), ct);
-            return message.ConversationId;
+            return Unit.Value;
         }
     }
 }
