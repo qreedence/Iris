@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using FluentAssertions;
+using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Commands.SendMessage;
 using Iris.Application.Conversations.Queries;
@@ -34,6 +35,68 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         using var scope = _factory.Services.CreateScope();
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
         await mediator.Send(command, TestContext.Current.CancellationToken);
+    }
+
+    // ── POST /api/conversations ────────────────────────────────────
+
+    [Fact]
+    public async Task PostConversation_ValidData_Returns201WithId()
+    {
+        // Act
+        var response = await _client.PostAsJsonAsync(
+            "/api/conversations",
+            new CreateConversationRequest(Guid.NewGuid(), "New Chat"),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var conversationId = await response.Content
+            .ReadFromJsonAsync<Guid>(JsonOptions, TestContext.Current.CancellationToken);
+
+        conversationId.Should().NotBe(Guid.Empty);
+        response.Headers.Location.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task PostConversation_EmptyTitle_Returns400()
+    {
+        // Act
+        var response = await _client.PostAsJsonAsync(
+            "/api/conversations",
+            new CreateConversationRequest(Guid.NewGuid(), ""),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task PostConversation_SequentialCreates_BothSucceed()
+    {
+        // Arrange — create a conversation via MediatR first
+        var conversationId = Guid.NewGuid();
+        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Existing"));
+
+        // Act — create another via HTTP (server generates a new ID, so no actual duplicate)
+        // Instead, test the handler's duplicate guard by sending the same command twice
+        var response1 = await _client.PostAsJsonAsync(
+            "/api/conversations",
+            new CreateConversationRequest(Guid.NewGuid(), "Chat A"),
+            TestContext.Current.CancellationToken);
+
+        response1.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        // The server generates IDs, so true duplicates can't happen via REST.
+        // The duplicate guard only fires if the same ConversationId is reused,
+        // which the endpoint prevents by generating a new Guid each time.
+        // This test verifies two sequential creates both succeed.
+        var response2 = await _client.PostAsJsonAsync(
+            "/api/conversations",
+            new CreateConversationRequest(Guid.NewGuid(), "Chat B"),
+            TestContext.Current.CancellationToken);
+
+        response2.StatusCode.Should().Be(HttpStatusCode.Created);
     }
 
     // ── §1 GET /api/conversations — empty ─────────────────────────

@@ -6,6 +6,10 @@
 # dotenv files
 .env
 
+# Agent instructions (local dev only)
+AGENTS.md
+CLAUDE.md
+
 # User-specific files
 *.rsuser
 *.suo

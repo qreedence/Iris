@@ -1,6 +1,7 @@
 using Iris.Application.Conversations;
-using Iris.Application.Conversations.Queries;
+using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Commands.SendMessage;
+using Iris.Application.Conversations.Queries;
 using Iris.Domain.AiIntegration;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
@@ -23,6 +24,19 @@ public class ConversationsController : ControllerBase
         _conversationQueries = conversationQueries;
         _mediator = mediator;
         _scopeFactory = scopeFactory;
+    }
+
+    [HttpPost]
+    [ProducesResponseType<Guid>(201)]
+    [ProducesResponseType<ProblemDetails>(400)]
+    public async Task<IActionResult> Create(
+        [FromBody] CreateConversationRequest request,
+        CancellationToken ct = default)
+    {
+        var conversationId = Guid.NewGuid();
+        var command = new CreateConversationCommand(conversationId, request.PersonaId, request.Title);
+        await _mediator.Send(command, ct);
+        return CreatedAtAction(nameof(GetMessages), new { id = conversationId }, conversationId);
     }
 
     [HttpGet]
