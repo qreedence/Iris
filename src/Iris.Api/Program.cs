@@ -1,4 +1,6 @@
+using Iris.Api.Hubs;
 using Iris.Application;
+using Iris.Application.Conversations;
 using Iris.Application.Exceptions;
 using Iris.Infrastructure;
 using Microsoft.AspNetCore.Diagnostics;
@@ -14,7 +16,8 @@ builder.Services.AddCors(options =>
     {
         policy.WithOrigins("http://localhost:5174")
             .AllowAnyHeader()
-            .AllowAnyMethod();
+            .AllowAnyMethod()
+            .AllowCredentials();
     });
 });
 
@@ -25,6 +28,8 @@ builder.Services.AddControllers()
     });
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddSignalR();
+builder.Services.AddScoped<IChatStreamNotifier, SignalRChatStreamNotifier>();
 
 builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
@@ -65,6 +70,7 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
 app.MapControllers();
+app.MapHub<ChatHub>("/hubs/chat");
 app.MapHealthChecks("/health");
 app.Run();
 

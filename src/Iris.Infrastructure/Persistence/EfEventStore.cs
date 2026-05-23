@@ -71,7 +71,8 @@ public class EfEventStore : IEventStore
         ["MessageSent"] = typeof(MessageSent),
         ["AssistantResponseCompleted"] = typeof(AssistantResponseCompleted),
         ["TurnCompleted"] = typeof(TurnCompleted),
+        ["TurnFailed"] = typeof(TurnFailed),
+        ["TurnCancelled"] = typeof(TurnCancelled),
         ["ConversationArchived"] = typeof(ConversationArchived),
     };
 }
-
