@@ -199,6 +199,8 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
             new MessageSent(Guid.NewGuid(), aggregateId, "What is the meaning of life?", ChatRole.User),
             new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, "42, obviously.", "anthropic/claude-sonnet-4"),
             new TurnCompleted(aggregateId, 150, 42),
+            new TurnFailed(aggregateId, FailureSource.Provider, "rate_limited", "Rate limit exceeded.", "partial answer"),
+            new TurnCancelled(aggregateId, "cancelled partial"),
             new ConversationArchived(aggregateId),
         };
 
@@ -210,7 +212,7 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
         var stream = await readSut.LoadStreamAsync(aggregateId, TestContext.Current.CancellationToken);
 
         // Assert — verify each event deserializes to the correct type with all properties
-        stream.Should().HaveCount(5);
+        stream.Should().HaveCount(7);
 
         var created = stream[0].Should().BeOfType<ConversationCreated>().Subject;
         created.ConversationId.Should().Be(aggregateId);
@@ -229,7 +231,16 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
         turn.InputTokens.Should().Be(150);
         turn.OutputTokens.Should().Be(42);
 
-        var archived = stream[4].Should().BeOfType<ConversationArchived>().Subject;
+        var failed = stream[4].Should().BeOfType<TurnFailed>().Subject;
+        failed.Source.Should().Be(FailureSource.Provider);
+        failed.ErrorCode.Should().Be("rate_limited");
+        failed.Message.Should().Be("Rate limit exceeded.");
+        failed.PartialContent.Should().Be("partial answer");
+
+        var cancelled = stream[5].Should().BeOfType<TurnCancelled>().Subject;
+        cancelled.PartialContent.Should().Be("cancelled partial");
+
+        var archived = stream[6].Should().BeOfType<ConversationArchived>().Subject;
         archived.ConversationId.Should().Be(aggregateId);
     }
 

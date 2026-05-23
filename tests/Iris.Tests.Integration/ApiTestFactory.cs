@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Iris.Application.AiIntegration;
 using Iris.Application.AiIntegration.Models;
 using Iris.Infrastructure.Persistence;
@@ -29,7 +30,20 @@ public class ApiTestFactory : WebApplicationFactory<Program>, IAsyncLifetime
         var mock = Substitute.For<IChatProvider>();
         mock.CompleteAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
             .Returns(new ChatResponse("Mock AI response", new UsageInfo(10, 5, 15)));
+        mock.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => StreamResponse("Mock AI response", call.ArgAt<CancellationToken>(1)));
         return mock;
+    }
+
+    private static async IAsyncEnumerable<StreamedChunk> StreamResponse(
+        string content,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        yield return new StreamedChunk(content, false, null);
+        await Task.Yield();
+        ct.ThrowIfCancellationRequested();
+        yield return new StreamedChunk(null, true, new UsageInfo(10, 5, 15));
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
