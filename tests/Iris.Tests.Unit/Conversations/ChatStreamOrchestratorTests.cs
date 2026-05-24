@@ -5,6 +5,7 @@ using Iris.Application.AiIntegration.Exceptions;
 using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Notifications;
+using Iris.Application.Exceptions;
 using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
@@ -184,7 +185,137 @@ public class ChatStreamOrchestratorTests
             Arg.Any<CancellationToken>());
     }
 
-    private void SetupExistingConversation(Guid conversationId)
+    [Fact]
+    public async Task StreamAsync_PersonaHasSystemPrompt_PassesToProvider()
+    {
+        // Arrange
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        SetupExistingConversation(conversationId, systemPrompt: "Speak plainly.");
+        ChatRequest? capturedRequest = null;
+
+        _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => CaptureAndStreamResponse(
+                call.Arg<ChatRequest>(),
+                request => capturedRequest = request,
+                call.ArgAt<CancellationToken>(1)));
+
+        // Act
+        await sut.StreamAsync(conversationId, "fallback/model", null, TestContext.Current.CancellationToken);
+
+        // Assert
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.SystemPrompt.Should().Be("Speak plainly.");
+    }
+
+    [Fact]
+    public async Task StreamAsync_PersonaHasNoSystemPrompt_SendsNullToProvider()
+    {
+        // Arrange
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        SetupExistingConversation(conversationId, systemPrompt: null);
+        ChatRequest? capturedRequest = null;
+
+        _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => CaptureAndStreamResponse(
+                call.Arg<ChatRequest>(),
+                request => capturedRequest = request,
+                call.ArgAt<CancellationToken>(1)));
+
+        // Act
+        await sut.StreamAsync(conversationId, "fallback/model", null, TestContext.Current.CancellationToken);
+
+        // Assert
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.SystemPrompt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task StreamAsync_PersonaHasModelPreference_UsesPreference()
+    {
+        // Arrange
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        SetupExistingConversation(conversationId, modelPreference: "persona/model");
+        ChatRequest? capturedRequest = null;
+
+        _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => CaptureAndStreamResponse(
+                call.Arg<ChatRequest>(),
+                request => capturedRequest = request,
+                call.ArgAt<CancellationToken>(1)));
+
+        // Act
+        await sut.StreamAsync(conversationId, "fallback/model", null, TestContext.Current.CancellationToken);
+
+        // Assert
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.Model.Should().Be("persona/model");
+    }
+
+    [Fact]
+    public async Task StreamAsync_PersonaHasNoModelPreference_UsesFallbackModel()
+    {
+        // Arrange
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        SetupExistingConversation(conversationId, modelPreference: null);
+        ChatRequest? capturedRequest = null;
+
+        _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => CaptureAndStreamResponse(
+                call.Arg<ChatRequest>(),
+                request => capturedRequest = request,
+                call.ArgAt<CancellationToken>(1)));
+
+        // Act
+        await sut.StreamAsync(conversationId, "fallback/model", null, TestContext.Current.CancellationToken);
+
+        // Assert
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.Model.Should().Be("fallback/model");
+    }
+
+    [Fact]
+    public async Task StreamAsync_PersonaNotFound_AppendsTurnFailed()
+    {
+        // Arrange
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
+
+        _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
+            .Returns([
+                new ConversationCreated(conversationId, personaId, "Chat"),
+                new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User)
+            ]);
+        _personaService.GetForConversationAsync(personaId, Arg.Any<CancellationToken>())
+            .Returns<Task<PersonaDto>>(_ => throw new NotFoundException("Persona not found."));
+
+        // Act
+        await sut.StreamAsync(conversationId, "fallback/model", null, TestContext.Current.CancellationToken);
+
+        // Assert
+        await _eventStore.Received(1).AppendAsync(
+            conversationId,
+            Arg.Is<IEnumerable<ConversationEvent>>(events => ContainsPersonaNotFoundFailure(events)),
+            Arg.Any<Guid>(),
+            CancellationToken.None);
+
+        await _notifier.Received(1).SendErrorAsync(
+            conversationId,
+            "persona_not_found",
+            "The persona for this conversation no longer exists.",
+            CancellationToken.None);
+        await _notifier.DidNotReceive().SendCompletedAsync(conversationId, Arg.Any<CancellationToken>());
+        _chatProvider.DidNotReceive().StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    private void SetupExistingConversation(
+        Guid conversationId,
+        string? systemPrompt = null,
+        string? modelPreference = null)
     {
         var personaId = Guid.NewGuid();
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
@@ -192,7 +323,7 @@ public class ChatStreamOrchestratorTests
                 new ConversationCreated(conversationId, personaId, "Chat"),
                 new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User)
             ]);
-        SetupPersona(personaId);
+        SetupPersona(personaId, systemPrompt, modelPreference);
     }
 
     private void SetupPersona(Guid personaId, string? systemPrompt = null, string? modelPreference = null)
@@ -245,6 +376,31 @@ public class ChatStreamOrchestratorTests
     {
         var cancelled = events.SingleOrDefault() as TurnCancelled;
         return cancelled?.PartialContent == "partial";
+    }
+
+    private static bool ContainsPersonaNotFoundFailure(IEnumerable<ConversationEvent> events)
+    {
+        var failed = events.SingleOrDefault() as TurnFailed;
+
+        return failed?.Source == FailureSource.Internal &&
+            failed.ErrorCode == "persona_not_found" &&
+            failed.Message == "The persona for this conversation no longer exists." &&
+            failed.PartialContent is null;
+    }
+
+    private static async IAsyncEnumerable<StreamedChunk> CaptureAndStreamResponse(
+        ChatRequest request,
+        Action<ChatRequest> capture,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        capture(request);
+        await foreach (var chunk in StreamChunks([
+            new StreamedChunk("response", false, null),
+            new StreamedChunk(null, true, new UsageInfo(1, 1, 2))
+        ], ct))
+        {
+            yield return chunk;
+        }
     }
 
     private static async IAsyncEnumerable<StreamedChunk> StreamChunks(

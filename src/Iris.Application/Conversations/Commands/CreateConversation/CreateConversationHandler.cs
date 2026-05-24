@@ -24,9 +24,8 @@ namespace Iris.Application.Conversations.Commands.CreateConversation
             if (command.ConversationId == Guid.Empty)
                 throw new ValidationException("ConversationId can not be empty.");
             
-            // TODO: keep hidden until personas exist
-            //  if (command.PersonaId == Guid.Empty)
-            //  throw new ValidationException("PersonaId can not be empty.");
+            if (command.PersonaId == Guid.Empty)
+                throw new ValidationException("PersonaId can not be empty.");
             
             var existingEvents = await _eventStore.LoadStreamAsync(command.ConversationId, ct);
             if (existingEvents.Count > 0)
