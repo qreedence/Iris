@@ -169,9 +169,9 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
     }
 
     [Fact]
-    public async Task PostChat_PersonaWithModelPreference_ProviderUsesPreferenceModel()
+    public async Task PostChat_PersonaWithModelPreference_ProviderUsesPreferenceWhenRequestMatches()
     {
-        // Arrange
+        // Arrange — frontend sends the persona's preferred model (user hasn't switched)
         ChatRequest? capturedRequest = null;
         _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
             .Returns(call => CaptureAndStreamResponse(
@@ -184,10 +184,10 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         var conversationId = Guid.NewGuid();
         await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
 
-        // Act
+        // Act — request model matches persona preference
         var response = await _client.PostAsJsonAsync(
             $"/api/conversations/{conversationId}/chat",
-            CreateChatRequest(userMessage, "fallback/model"),
+            CreateChatRequest(userMessage, "persona/model"),
             TestContext.Current.CancellationToken);
 
         // Assert

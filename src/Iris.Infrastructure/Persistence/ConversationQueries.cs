@@ -23,6 +23,7 @@ namespace Iris.Infrastructure.Persistence
                c.Id,
                c.PersonaId,
                c.Title,
+               c.CurrentModel,
                c.CreatedAt,
                c.MessageCount,
                c.LastMessageAt))

@@ -80,8 +80,22 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
             return;
         }
 
+        // Model resolution: ModelChanged (explicit override) > persona preference > request fallback
+        var latestModelChanged = events.OfType<ModelChanged>().LastOrDefault()?.Model;
+        var effectiveModel = latestModelChanged ?? persona.ModelPreference ?? model;
+
+        // If the request model differs from the effective model, the user is switching
+        if (model != effectiveModel)
+        {
+            var modelChanged = new ModelChanged(conversationId, model);
+            await _eventStore.AppendAsync(conversationId, [modelChanged], Guid.NewGuid(), ct);
+            await _publisher.Publish(
+                new EventNotification<ModelChanged>(modelChanged, DateTimeOffset.UtcNow), ct);
+            effectiveModel = model;
+        }
+
         var chatRequest = new ChatRequest(
-            persona.ModelPreference ?? model,
+            effectiveModel,
             BuildMessageHistory(events),
             persona.SystemPrompt,
             modelParameters);

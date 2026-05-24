@@ -232,9 +232,9 @@ public class ChatStreamOrchestratorTests
     }
 
     [Fact]
-    public async Task StreamAsync_PersonaHasModelPreference_UsesPreference()
+    public async Task StreamAsync_PersonaHasModelPreference_UsesPreferenceWhenRequestMatches()
     {
-        // Arrange
+        // Arrange — request sends same model as preference (no switch)
         var sut = CreateSut();
         var conversationId = Guid.NewGuid();
         SetupExistingConversation(conversationId, modelPreference: "persona/model");
@@ -246,12 +246,16 @@ public class ChatStreamOrchestratorTests
                 request => capturedRequest = request,
                 call.ArgAt<CancellationToken>(1)));
 
-        // Act
-        await sut.StreamAsync(conversationId, "fallback/model", null, TestContext.Current.CancellationToken);
+        // Act — frontend sends persona's preferred model (user hasn't switched)
+        await sut.StreamAsync(conversationId, "persona/model", null, TestContext.Current.CancellationToken);
 
-        // Assert
+        // Assert — preference used, no ModelChanged emitted
         capturedRequest.Should().NotBeNull();
         capturedRequest!.Model.Should().Be("persona/model");
+
+        await _publisher.DidNotReceive().Publish(
+            Arg.Any<EventNotification<ModelChanged>>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -312,6 +316,142 @@ public class ChatStreamOrchestratorTests
         _chatProvider.DidNotReceive().StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task StreamAsync_ModelDiffersFromEffective_EmitsModelChanged()
+    {
+        // Arrange — persona prefers "persona/model", request sends "new/model"
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        SetupExistingConversation(conversationId, modelPreference: "persona/model");
+        ChatRequest? capturedRequest = null;
+
+        _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => CaptureAndStreamResponse(
+                call.Arg<ChatRequest>(),
+                request => capturedRequest = request,
+                call.ArgAt<CancellationToken>(1)));
+
+        // Act
+        await sut.StreamAsync(conversationId, "new/model", null, TestContext.Current.CancellationToken);
+
+        // Assert — ModelChanged event emitted
+        await _eventStore.Received(1).AppendAsync(
+            conversationId,
+            Arg.Is<IEnumerable<ConversationEvent>>(events =>
+                events.OfType<ModelChanged>().Any(e => e.Model == "new/model")),
+            Arg.Any<Guid>(),
+            Arg.Any<CancellationToken>());
+
+        await _publisher.Received(1).Publish(
+            Arg.Is<EventNotification<ModelChanged>>(n => n.Event.Model == "new/model"),
+            Arg.Any<CancellationToken>());
+
+        // Streaming uses the new model
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.Model.Should().Be("new/model");
+    }
+
+    [Fact]
+    public async Task StreamAsync_ModelMatchesEffective_NoModelChangedEmitted()
+    {
+        // Arrange — persona prefers "persona/model", request sends same
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        SetupExistingConversation(conversationId, modelPreference: "persona/model");
+
+        _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => CaptureAndStreamResponse(
+                call.Arg<ChatRequest>(),
+                _ => { },
+                call.ArgAt<CancellationToken>(1)));
+
+        // Act
+        await sut.StreamAsync(conversationId, "persona/model", null, TestContext.Current.CancellationToken);
+
+        // Assert — no ModelChanged emitted
+        await _eventStore.DidNotReceive().AppendAsync(
+            conversationId,
+            Arg.Is<IEnumerable<ConversationEvent>>(events =>
+                events.OfType<ModelChanged>().Any()),
+            Arg.Any<Guid>(),
+            Arg.Any<CancellationToken>());
+
+        await _publisher.DidNotReceive().Publish(
+            Arg.Any<EventNotification<ModelChanged>>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StreamAsync_HasModelChangedEvent_UsesModelChangedOverEverything()
+    {
+        // Arrange — ModelChanged says "changed/model", persona prefers "persona/model", request says "changed/model"
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
+
+        _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
+            .Returns([
+                new ConversationCreated(conversationId, personaId, "Chat"),
+                new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User),
+                new ModelChanged(conversationId, "changed/model")
+            ]);
+        SetupPersona(personaId, modelPreference: "persona/model");
+        ChatRequest? capturedRequest = null;
+
+        _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => CaptureAndStreamResponse(
+                call.Arg<ChatRequest>(),
+                request => capturedRequest = request,
+                call.ArgAt<CancellationToken>(1)));
+
+        // Act — request also sends "changed/model" (matches, no new event)
+        await sut.StreamAsync(conversationId, "changed/model", null, TestContext.Current.CancellationToken);
+
+        // Assert — uses ModelChanged model, NOT persona preference
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.Model.Should().Be("changed/model");
+
+        // No new ModelChanged emitted (request matches)
+        await _publisher.DidNotReceive().Publish(
+            Arg.Any<EventNotification<ModelChanged>>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StreamAsync_ModelChangedThenSwitchAgain_EmitsNewModelChanged()
+    {
+        // Arrange — previous ModelChanged to "old/model", now switching to "newer/model"
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
+
+        _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
+            .Returns([
+                new ConversationCreated(conversationId, personaId, "Chat"),
+                new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User),
+                new ModelChanged(conversationId, "old/model")
+            ]);
+        SetupPersona(personaId, modelPreference: "persona/model");
+        ChatRequest? capturedRequest = null;
+
+        _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => CaptureAndStreamResponse(
+                call.Arg<ChatRequest>(),
+                request => capturedRequest = request,
+                call.ArgAt<CancellationToken>(1)));
+
+        // Act — request sends "newer/model" (differs from "old/model")
+        await sut.StreamAsync(conversationId, "newer/model", null, TestContext.Current.CancellationToken);
+
+        // Assert — emits new ModelChanged, uses newer model
+        await _publisher.Received(1).Publish(
+            Arg.Is<EventNotification<ModelChanged>>(n => n.Event.Model == "newer/model"),
+            Arg.Any<CancellationToken>());
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.Model.Should().Be("newer/model");
+    }
+
     private void SetupExistingConversation(
         Guid conversationId,
         string? systemPrompt = null,
@@ -334,6 +474,8 @@ public class ChatStreamOrchestratorTests
                 "Iris",
                 systemPrompt,
                 modelPreference,
+                null,
+                null,
                 null,
                 DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow));

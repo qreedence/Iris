@@ -73,6 +73,7 @@ public class EfEventStore : IEventStore
         ["TurnCompleted"] = typeof(TurnCompleted),
         ["TurnFailed"] = typeof(TurnFailed),
         ["TurnCancelled"] = typeof(TurnCancelled),
+        ["ModelChanged"] = typeof(ModelChanged),
         ["ConversationArchived"] = typeof(ConversationArchived),
     };
 }

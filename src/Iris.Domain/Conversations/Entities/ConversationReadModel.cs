@@ -5,6 +5,7 @@
         public Guid Id { get; set; }
         public Guid PersonaId { get; set; }
         public string Title { get; set; } = string.Empty;
+        public string? CurrentModel { get; set; }
         public int MessageCount { get; set; }
         public DateTimeOffset? LastMessageAt { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
