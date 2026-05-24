@@ -16,6 +16,8 @@ public class PersonaService : IPersonaService
             p.Name,
             p.SystemPrompt,
             p.ModelPreference,
+            p.Role,
+            p.Group,
             p.Avatar,
             p.CreatedAt,
             p.UpdatedAt);
@@ -63,6 +65,8 @@ public class PersonaService : IPersonaService
             Name = request.Name,
             SystemPrompt = request.SystemPrompt,
             ModelPreference = request.ModelPreference,
+            Role = request.Role,
+            Group = request.Group,
             Avatar = request.Avatar,
             CreatedAt = now,
             UpdatedAt = now
@@ -92,6 +96,8 @@ public class PersonaService : IPersonaService
         persona.Name = request.Name;
         persona.SystemPrompt = request.SystemPrompt;
         persona.ModelPreference = request.ModelPreference;
+        persona.Role = request.Role;
+        persona.Group = request.Group;
         persona.Avatar = request.Avatar;
         persona.UpdatedAt = DateTimeOffset.UtcNow;
 

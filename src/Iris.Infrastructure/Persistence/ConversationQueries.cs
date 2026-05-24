@@ -21,6 +21,7 @@ namespace Iris.Infrastructure.Persistence
            .Take(take)
            .Select(c => new ConversationSummaryDto(
                c.Id,
+               c.PersonaId,
                c.Title,
                c.CreatedAt,
                c.MessageCount,

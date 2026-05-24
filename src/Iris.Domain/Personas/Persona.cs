@@ -7,6 +7,8 @@ public class Persona
     public string Name { get; set; } = string.Empty;
     public string? SystemPrompt { get; set; }
     public string? ModelPreference { get; set; }
+    public string? Role { get; set; }
+    public string? Group { get; set; }
     public string? Avatar { get; set; }
     public bool IsDeleted { get; set; }
     public DateTimeOffset? DeletedAt { get; set; }
