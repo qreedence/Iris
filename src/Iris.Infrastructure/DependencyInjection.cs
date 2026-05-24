@@ -1,8 +1,10 @@
 ﻿using Iris.Application.AiIntegration;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Queries;
+using Iris.Application.Personas;
 using Iris.Infrastructure.AiIntegration;
 using Iris.Infrastructure.Persistence;
+using Iris.Infrastructure.Personas;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,6 +40,7 @@ namespace Iris.Infrastructure
             services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(DependencyInjection).Assembly));
             services.AddScoped<IConversationQueries, ConversationQueries>();
             services.AddScoped<IEventStore, EfEventStore>();
+            services.AddScoped<IPersonaService, PersonaService>();
 
             return services;
         }

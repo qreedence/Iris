@@ -7,6 +7,7 @@ using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Queries;
+using Iris.Application.Personas;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
@@ -31,18 +32,30 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         await mediator.Send(command, TestContext.Current.CancellationToken);
     }
 
+    private async Task<PersonaDto> CreatePersonaAsync(
+        string name = "Iris",
+        string? systemPrompt = null,
+        string? modelPreference = null)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
+        return await personaService.CreateAsync(
+            new CreatePersonaRequest(Guid.NewGuid(), name, systemPrompt, modelPreference),
+            TestContext.Current.CancellationToken);
+    }
+
     private static ChatRequestDto CreateChatRequest(
         string userMessage = "Hello!",
-        string model = "test/model",
-        string? systemPrompt = null) =>
-        new(userMessage, model, systemPrompt);
+        string model = "test/model") =>
+        new(userMessage, model);
 
     [Fact]
     public async Task PostChat_ValidConversation_Returns202Accepted()
     {
         // Arrange
+        var persona = await CreatePersonaAsync();
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
 
         // Act
         var response = await _client.PostAsJsonAsync(
@@ -71,8 +84,9 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
     public async Task PostChat_ValidConversation_PersistsUserMessage()
     {
         // Arrange
+        var persona = await CreatePersonaAsync();
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
 
         // Act
         var response = await _client.PostAsJsonAsync(
@@ -101,8 +115,9 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
                 request => capturedRequest = request,
                 call.ArgAt<CancellationToken>(1)));
 
+        var persona = await CreatePersonaAsync();
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
 
         // Turn 1
         await _client.PostAsJsonAsync(
@@ -123,6 +138,90 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         capturedRequest.Should().NotBeNull();
         capturedRequest!.Messages[0].Content.Should().Be("First question");
         capturedRequest.Messages[^1].Content.Should().Be("Follow-up");
+    }
+
+    [Fact]
+    public async Task PostChat_PersonaWithSystemPrompt_ProviderReceivesPrompt()
+    {
+        // Arrange
+        ChatRequest? capturedRequest = null;
+        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => CaptureAndStreamResponse(
+                call.Arg<ChatRequest>(),
+                request => capturedRequest = request,
+                call.ArgAt<CancellationToken>(1)));
+
+        var userMessage = $"prompt-test-{Guid.NewGuid()}";
+        var persona = await CreatePersonaAsync(systemPrompt: "Answer as Iris.");
+        var conversationId = Guid.NewGuid();
+        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
+
+        // Act
+        var response = await _client.PostAsJsonAsync(
+            $"/api/conversations/{conversationId}/chat",
+            CreateChatRequest(userMessage),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == userMessage);
+        capturedRequest!.SystemPrompt.Should().Be("Answer as Iris.");
+    }
+
+    [Fact]
+    public async Task PostChat_PersonaWithModelPreference_ProviderUsesPreferenceModel()
+    {
+        // Arrange
+        ChatRequest? capturedRequest = null;
+        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => CaptureAndStreamResponse(
+                call.Arg<ChatRequest>(),
+                request => capturedRequest = request,
+                call.ArgAt<CancellationToken>(1)));
+
+        var userMessage = $"model-preference-test-{Guid.NewGuid()}";
+        var persona = await CreatePersonaAsync(modelPreference: "persona/model");
+        var conversationId = Guid.NewGuid();
+        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
+
+        // Act
+        var response = await _client.PostAsJsonAsync(
+            $"/api/conversations/{conversationId}/chat",
+            CreateChatRequest(userMessage, "fallback/model"),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == userMessage);
+        capturedRequest!.Model.Should().Be("persona/model");
+    }
+
+    [Fact]
+    public async Task PostChat_PersonaWithoutModelPreference_ProviderUsesFallbackModel()
+    {
+        // Arrange
+        ChatRequest? capturedRequest = null;
+        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => CaptureAndStreamResponse(
+                call.Arg<ChatRequest>(),
+                request => capturedRequest = request,
+                call.ArgAt<CancellationToken>(1)));
+
+        var userMessage = $"fallback-model-test-{Guid.NewGuid()}";
+        var persona = await CreatePersonaAsync();
+        var conversationId = Guid.NewGuid();
+        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
+
+        // Act
+        var response = await _client.PostAsJsonAsync(
+            $"/api/conversations/{conversationId}/chat",
+            CreateChatRequest(userMessage, "fallback/model"),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == userMessage);
+        capturedRequest!.Model.Should().Be("fallback/model");
     }
 
     private static async IAsyncEnumerable<StreamedChunk> CaptureAndStreamResponse(
