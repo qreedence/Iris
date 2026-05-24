@@ -88,7 +88,6 @@ public class ConversationsController : ControllerBase
                 await orchestrator.StreamAsync(
                     id,
                     request.Model,
-                    request.SystemPrompt,
                     request.ModelParameters,
                     CancellationToken.None);
             }

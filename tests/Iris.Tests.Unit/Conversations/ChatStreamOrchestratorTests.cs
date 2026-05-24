@@ -5,6 +5,7 @@ using Iris.Application.AiIntegration.Exceptions;
 using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Notifications;
+using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
 using MediatR;
@@ -18,10 +19,11 @@ public class ChatStreamOrchestratorTests
     private readonly IEventStore _eventStore = Substitute.For<IEventStore>();
     private readonly IChatProvider _chatProvider = Substitute.For<IChatProvider>();
     private readonly IChatStreamNotifier _notifier = Substitute.For<IChatStreamNotifier>();
+    private readonly IPersonaService _personaService = Substitute.For<IPersonaService>();
     private readonly IPublisher _publisher = Substitute.For<IPublisher>();
 
     private ChatStreamOrchestrator CreateSut() =>
-        new(_eventStore, _chatProvider, _notifier, _publisher, NullLogger<ChatStreamOrchestrator>.Instance);
+        new(_eventStore, _chatProvider, _notifier, _personaService, _publisher, NullLogger<ChatStreamOrchestrator>.Instance);
 
     [Fact]
     public async Task StreamAsync_Success_StreamsChunksAndAppendsCompletionEvents()
@@ -29,14 +31,16 @@ public class ChatStreamOrchestratorTests
         // Arrange
         var sut = CreateSut();
         var conversationId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
 
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns([
-                new ConversationCreated(conversationId, Guid.NewGuid(), "Chat"),
+                new ConversationCreated(conversationId, personaId, "Chat"),
                 new MessageSent(Guid.NewGuid(), conversationId, "First user message", ChatRole.User),
                 new AssistantResponseCompleted(Guid.NewGuid(), conversationId, "First assistant response", "test/model"),
                 new MessageSent(Guid.NewGuid(), conversationId, "Second user message", ChatRole.User)
             ]);
+        SetupPersona(personaId, systemPrompt: "You are Iris.");
 
         _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
             .Returns(call => StreamChunks([
@@ -46,7 +50,7 @@ public class ChatStreamOrchestratorTests
             ], call.ArgAt<CancellationToken>(1)));
 
         // Act
-        await sut.StreamAsync(conversationId, "test/model", "You are Iris.", null, TestContext.Current.CancellationToken);
+        await sut.StreamAsync(conversationId, "test/model", null, TestContext.Current.CancellationToken);
 
         // Assert
         _chatProvider.Received(1).StreamAsync(
@@ -91,7 +95,7 @@ public class ChatStreamOrchestratorTests
                 call.ArgAt<CancellationToken>(1)));
 
         // Act
-        await sut.StreamAsync(conversationId, "test/model", null, null, TestContext.Current.CancellationToken);
+        await sut.StreamAsync(conversationId, "test/model", null, TestContext.Current.CancellationToken);
 
         // Assert
         await _eventStore.Received(1).AppendAsync(
@@ -123,7 +127,7 @@ public class ChatStreamOrchestratorTests
                 call.ArgAt<CancellationToken>(1)));
 
         // Act
-        await sut.StreamAsync(conversationId, "test/model", null, null, TestContext.Current.CancellationToken);
+        await sut.StreamAsync(conversationId, "test/model", null, TestContext.Current.CancellationToken);
 
         // Assert
         await _eventStore.Received(1).AppendAsync(
@@ -155,7 +159,7 @@ public class ChatStreamOrchestratorTests
                 call.ArgAt<CancellationToken>(1)));
 
         // Act
-        await sut.StreamAsync(conversationId, "test/model", null, null, TestContext.Current.CancellationToken);
+        await sut.StreamAsync(conversationId, "test/model", null, TestContext.Current.CancellationToken);
 
         // Assert
         await _eventStore.Received(1).AppendAsync(
@@ -182,11 +186,26 @@ public class ChatStreamOrchestratorTests
 
     private void SetupExistingConversation(Guid conversationId)
     {
+        var personaId = Guid.NewGuid();
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns([
-                new ConversationCreated(conversationId, Guid.NewGuid(), "Chat"),
+                new ConversationCreated(conversationId, personaId, "Chat"),
                 new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User)
             ]);
+        SetupPersona(personaId);
+    }
+
+    private void SetupPersona(Guid personaId, string? systemPrompt = null, string? modelPreference = null)
+    {
+        _personaService.GetForConversationAsync(personaId, Arg.Any<CancellationToken>())
+            .Returns(new PersonaDto(
+                personaId,
+                "Iris",
+                systemPrompt,
+                modelPreference,
+                null,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow));
     }
 
     private static bool ContainsCompletionEvents(IEnumerable<ConversationEvent> events)

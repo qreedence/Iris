@@ -36,6 +36,27 @@ public class PersonaService : IPersonaService
         return persona;
     }
 
+    public async Task<PersonaDto> GetForConversationAsync(Guid id, CancellationToken ct = default)
+    {
+        var persona = await _db.Personas
+            .AsNoTracking()
+            .Where(p => p.Id == id && !p.IsDeleted)
+            .Select(p => new PersonaDto(
+                p.Id,
+                p.Name,
+                p.SystemPrompt,
+                p.ModelPreference,
+                p.Avatar,
+                p.CreatedAt,
+                p.UpdatedAt))
+            .FirstOrDefaultAsync(ct);
+
+        if (persona is null)
+            throw new NotFoundException("Persona not found.");
+
+        return persona;
+    }
+
     public async Task<List<PersonaDto>> GetAllByUserIdAsync(Guid userId, CancellationToken ct = default)
     {
         return await _db.Personas

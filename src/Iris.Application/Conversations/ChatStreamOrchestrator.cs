@@ -4,6 +4,7 @@ using Iris.Application.AiIntegration.Exceptions;
 using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations.Notifications;
 using Iris.Application.Exceptions;
+using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
 using MediatR;
@@ -16,6 +17,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
     private readonly IEventStore _eventStore;
     private readonly IChatProvider _chatProvider;
     private readonly IChatStreamNotifier _notifier;
+    private readonly IPersonaService _personaService;
     private readonly IPublisher _publisher;
     private readonly ILogger<ChatStreamOrchestrator> _logger;
 
@@ -23,12 +25,14 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
         IEventStore eventStore,
         IChatProvider chatProvider,
         IChatStreamNotifier notifier,
+        IPersonaService personaService,
         IPublisher publisher,
         ILogger<ChatStreamOrchestrator> logger)
     {
         _eventStore = eventStore;
         _chatProvider = chatProvider;
         _notifier = notifier;
+        _personaService = personaService;
         _publisher = publisher;
         _logger = logger;
     }
@@ -36,7 +40,6 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
     public async Task StreamAsync(
         Guid conversationId,
         string model,
-        string? systemPrompt,
         ModelParameters? modelParameters,
         CancellationToken ct)
     {
@@ -44,10 +47,43 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
         if (events.Count == 0)
             throw new NotFoundException("Conversation does not exist.");
 
+        var conversationCreated = events.OfType<ConversationCreated>().FirstOrDefault();
+        if (conversationCreated is null)
+            throw new NotFoundException("Conversation does not exist.");
+
+        PersonaDto persona;
+        try
+        {
+            persona = await _personaService.GetForConversationAsync(conversationCreated.PersonaId, ct);
+        }
+        catch (NotFoundException)
+        {
+            var turnFailed = new TurnFailed(
+                conversationId,
+                FailureSource.Internal,
+                "persona_not_found",
+                "The persona for this conversation no longer exists.",
+                null);
+
+            await _eventStore.AppendAsync(conversationId, [turnFailed], Guid.NewGuid(), CancellationToken.None);
+            await _notifier.SendErrorAsync(
+                conversationId,
+                "persona_not_found",
+                "The persona for this conversation no longer exists.",
+                CancellationToken.None);
+
+            _logger.LogWarning(
+                "Persona {PersonaId} for conversation {ConversationId} was not found",
+                conversationCreated.PersonaId,
+                conversationId);
+
+            return;
+        }
+
         var chatRequest = new ChatRequest(
-            model,
+            persona.ModelPreference ?? model,
             BuildMessageHistory(events),
-            systemPrompt,
+            persona.SystemPrompt,
             modelParameters);
 
         var content = new StringBuilder();

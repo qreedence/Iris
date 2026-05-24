@@ -33,9 +33,8 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
 
     private static ChatRequestDto CreateChatRequest(
         string userMessage = "Hello!",
-        string model = "test/model",
-        string? systemPrompt = null) =>
-        new(userMessage, model, systemPrompt);
+        string model = "test/model") =>
+        new(userMessage, model);
 
     [Fact]
     public async Task PostChat_ValidConversation_Returns202Accepted()
