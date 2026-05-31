@@ -46,8 +46,9 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
 
     private static ChatRequestDto CreateChatRequest(
         string userMessage = "Hello!",
-        string model = "test/model") =>
-        new(userMessage, model);
+        string model = "test/model",
+        bool changeModel = false) =>
+        new(userMessage, model, changeModel);
 
     [Fact]
     public async Task PostChat_ValidConversation_Returns202Accepted()
@@ -169,9 +170,9 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
     }
 
     [Fact]
-    public async Task PostChat_PersonaWithModelPreference_ProviderUsesPreferenceModel()
+    public async Task PostChat_PersonaWithModelPreference_ProviderUsesPreferenceWhenRequestMatches()
     {
-        // Arrange
+        // Arrange — frontend sends the persona's preferred model (user hasn't switched)
         ChatRequest? capturedRequest = null;
         _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
             .Returns(call => CaptureAndStreamResponse(
@@ -184,16 +185,72 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         var conversationId = Guid.NewGuid();
         await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
 
-        // Act
+        // Act — request model matches persona preference
         var response = await _client.PostAsJsonAsync(
             $"/api/conversations/{conversationId}/chat",
-            CreateChatRequest(userMessage, "fallback/model"),
+            CreateChatRequest(userMessage, "persona/model"),
             TestContext.Current.CancellationToken);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
         await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == userMessage);
         capturedRequest!.Model.Should().Be("persona/model");
+    }
+
+    [Fact]
+    public async Task PostChat_PersonaWithModelPreferenceAndChangeModelFalse_ProviderUsesPreferenceWhenRequestDiffers()
+    {
+        // Arrange — frontend sends fallback model, but does not request a model change.
+        ChatRequest? capturedRequest = null;
+        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => CaptureAndStreamResponse(
+                call.Arg<ChatRequest>(),
+                request => capturedRequest = request,
+                call.ArgAt<CancellationToken>(1)));
+
+        var userMessage = $"model-preference-fallback-test-{Guid.NewGuid()}";
+        var persona = await CreatePersonaAsync(modelPreference: "persona/model");
+        var conversationId = Guid.NewGuid();
+        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
+
+        // Act
+        var response = await _client.PostAsJsonAsync(
+            $"/api/conversations/{conversationId}/chat",
+            CreateChatRequest(userMessage, "frontend/fallback", changeModel: false),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == userMessage);
+        capturedRequest!.Model.Should().Be("persona/model");
+    }
+
+    [Fact]
+    public async Task PostChat_ChangeModelTrue_ProviderUsesRequestedModel()
+    {
+        // Arrange
+        ChatRequest? capturedRequest = null;
+        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => CaptureAndStreamResponse(
+                call.Arg<ChatRequest>(),
+                request => capturedRequest = request,
+                call.ArgAt<CancellationToken>(1)));
+
+        var userMessage = $"model-change-test-{Guid.NewGuid()}";
+        var persona = await CreatePersonaAsync(modelPreference: "persona/model");
+        var conversationId = Guid.NewGuid();
+        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
+
+        // Act
+        var response = await _client.PostAsJsonAsync(
+            $"/api/conversations/{conversationId}/chat",
+            CreateChatRequest(userMessage, "new/model", changeModel: true),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == userMessage);
+        capturedRequest!.Model.Should().Be("new/model");
     }
 
     [Fact]

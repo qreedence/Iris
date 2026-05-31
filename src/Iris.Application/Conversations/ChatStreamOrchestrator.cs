@@ -2,61 +2,46 @@ using System.Text;
 using Iris.Application.AiIntegration;
 using Iris.Application.AiIntegration.Exceptions;
 using Iris.Application.AiIntegration.Models;
-using Iris.Application.Conversations.Notifications;
-using Iris.Application.Exceptions;
-using Iris.Application.Personas;
-using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
-using MediatR;
 using Microsoft.Extensions.Logging;
 
 namespace Iris.Application.Conversations;
 
 public class ChatStreamOrchestrator : IChatStreamOrchestrator
 {
-    private readonly IEventStore _eventStore;
+    private readonly IConversationTurnPreparer _turnPreparer;
     private readonly IChatProvider _chatProvider;
     private readonly IChatStreamNotifier _notifier;
-    private readonly IPersonaService _personaService;
-    private readonly IPublisher _publisher;
+    private readonly IConversationEventRecorder _eventRecorder;
     private readonly ILogger<ChatStreamOrchestrator> _logger;
 
     public ChatStreamOrchestrator(
-        IEventStore eventStore,
+        IConversationTurnPreparer turnPreparer,
         IChatProvider chatProvider,
         IChatStreamNotifier notifier,
-        IPersonaService personaService,
-        IPublisher publisher,
+        IConversationEventRecorder eventRecorder,
         ILogger<ChatStreamOrchestrator> logger)
     {
-        _eventStore = eventStore;
+        _turnPreparer = turnPreparer;
         _chatProvider = chatProvider;
         _notifier = notifier;
-        _personaService = personaService;
-        _publisher = publisher;
+        _eventRecorder = eventRecorder;
         _logger = logger;
     }
 
     public async Task StreamAsync(
         Guid conversationId,
         string model,
+        bool changeModel,
         ModelParameters? modelParameters,
-        CancellationToken ct)
+        CancellationToken ct = default)
     {
-        var events = await _eventStore.LoadStreamAsync(conversationId, ct);
-        if (events.Count == 0)
-            throw new NotFoundException("Conversation does not exist.");
-
-        var conversationCreated = events.OfType<ConversationCreated>().FirstOrDefault();
-        if (conversationCreated is null)
-            throw new NotFoundException("Conversation does not exist.");
-
-        PersonaDto persona;
+        PreparedConversationTurn preparedTurn;
         try
         {
-            persona = await _personaService.GetForConversationAsync(conversationCreated.PersonaId, ct);
+            preparedTurn = await _turnPreparer.PrepareAsync(conversationId, model, changeModel, modelParameters, ct);
         }
-        catch (NotFoundException)
+        catch (ConversationPersonaNotFoundException ex)
         {
             var turnFailed = new TurnFailed(
                 conversationId,
@@ -65,7 +50,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
                 "The persona for this conversation no longer exists.",
                 null);
 
-            await _eventStore.AppendAsync(conversationId, [turnFailed], Guid.NewGuid(), CancellationToken.None);
+            await _eventRecorder.RecordAsync(conversationId, [turnFailed], CancellationToken.None);
             await _notifier.SendErrorAsync(
                 conversationId,
                 "persona_not_found",
@@ -74,24 +59,23 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
 
             _logger.LogWarning(
                 "Persona {PersonaId} for conversation {ConversationId} was not found",
-                conversationCreated.PersonaId,
+                ex.PersonaId,
                 conversationId);
 
             return;
         }
 
-        var chatRequest = new ChatRequest(
-            persona.ModelPreference ?? model,
-            BuildMessageHistory(events),
-            persona.SystemPrompt,
-            modelParameters);
+        if (preparedTurn.PreStreamEvents.Count > 0)
+        {
+            await _eventRecorder.RecordAsync(conversationId, preparedTurn.PreStreamEvents, ct);
+        }
 
         var content = new StringBuilder();
         UsageInfo? usageInfo = null;
 
         try
         {
-            await foreach (var chunk in _chatProvider.StreamAsync(chatRequest, ct).WithCancellation(ct))
+            await foreach (var chunk in _chatProvider.StreamAsync(preparedTurn.ChatRequest, ct).WithCancellation(ct))
             {
                 if (!string.IsNullOrEmpty(chunk.Content))
                 {
@@ -107,10 +91,9 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
         {
             var turnCancelled = new TurnCancelled(conversationId, GetPartialContent(content));
 
-            await _eventStore.AppendAsync(
+            await _eventRecorder.RecordAsync(
                 conversationId,
                 [turnCancelled],
-                Guid.NewGuid(),
                 CancellationToken.None);
 
             _logger.LogInformation("Conversation stream cancelled for {ConversationId}", conversationId);
@@ -127,7 +110,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
                 message,
                 GetPartialContent(content));
 
-            await _eventStore.AppendAsync(conversationId, [turnFailed], Guid.NewGuid(), CancellationToken.None);
+            await _eventRecorder.RecordAsync(conversationId, [turnFailed], CancellationToken.None);
             await _notifier.SendErrorAsync(conversationId, errorCode, message, CancellationToken.None);
 
             _logger.LogWarning(ex,
@@ -146,7 +129,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
                 "An unexpected error occurred.",
                 GetPartialContent(content));
 
-            await _eventStore.AppendAsync(conversationId, [turnFailed], Guid.NewGuid(), CancellationToken.None);
+            await _eventRecorder.RecordAsync(conversationId, [turnFailed], CancellationToken.None);
             await _notifier.SendErrorAsync(conversationId, "internal_error", "An unexpected error occurred.", CancellationToken.None);
             _logger.LogError(ex, "Unexpected error during streaming for {ConversationId}", conversationId);
 
@@ -158,48 +141,19 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
             Guid.NewGuid(),
             conversationId,
             content.ToString(),
-            chatRequest.Model);
+            preparedTurn.ChatRequest.Model);
 
         var turnCompleted = new TurnCompleted(
             conversationId,
             usageInfo?.InputTokens ?? 0,
             usageInfo?.OutputTokens ?? 0);
 
-        await _eventStore.AppendAsync(
+        await _eventRecorder.RecordAsync(
             conversationId,
             [assistantResponseCompleted, turnCompleted],
-            Guid.NewGuid(),
-            ct);
-
-        var occurredAt = DateTimeOffset.UtcNow;
-        await _publisher.Publish(
-            new EventNotification<AssistantResponseCompleted>(assistantResponseCompleted, occurredAt),
-            ct);
-        await _publisher.Publish(
-            new EventNotification<TurnCompleted>(turnCompleted, occurredAt),
             ct);
 
         await _notifier.SendCompletedAsync(conversationId, ct);
-    }
-
-    private static IReadOnlyList<ChatMessage> BuildMessageHistory(IEnumerable<ConversationEvent> events)
-    {
-        var messages = new List<ChatMessage>();
-
-        foreach (var evt in events)
-        {
-            switch (evt)
-            {
-                case MessageSent messageSent:
-                    messages.Add(new ChatMessage(messageSent.Role, messageSent.Content));
-                    break;
-                case AssistantResponseCompleted assistantResponseCompleted:
-                    messages.Add(new ChatMessage(ChatRole.Assistant, assistantResponseCompleted.Content));
-                    break;
-            }
-        }
-
-        return messages;
     }
 
     private static (FailureSource Source, string ErrorCode, string Message) MapFailure(ChatProviderException ex)

@@ -127,7 +127,7 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
         // Act
         var response = await _client.PutAsJsonAsync(
             $"/api/personas/{created.Id}?userId={userId}",
-            new UpdatePersonaRequest("After", "Updated prompt.", "test/model", "https://example.com/avatar.png"),
+            new UpdatePersonaRequest("After", SystemPrompt: "Updated prompt.", ModelPreference: "test/model", Avatar: "https://example.com/avatar.png"),
             TestContext.Current.CancellationToken);
 
         // Assert
@@ -175,6 +175,72 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task PostPersona_WithRoleAndGroup_Returns201WithFields()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        var request = new CreatePersonaRequest(userId, "Iris", Role: "Backend Architect", Group: "Dev Team");
+
+        // Act
+        var response = await _client.PostAsJsonAsync(
+            "/api/personas",
+            request,
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var persona = await response.Content.ReadFromJsonAsync<PersonaDto>(
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        persona!.Role.Should().Be("Backend Architect");
+        persona.Group.Should().Be("Dev Team");
+    }
+
+    [Fact]
+    public async Task PostPersona_WithoutRoleAndGroup_FieldsAreNull()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+
+        // Act
+        var response = await _client.PostAsJsonAsync(
+            "/api/personas",
+            new CreatePersonaRequest(userId, "Iris"),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        var persona = await response.Content.ReadFromJsonAsync<PersonaDto>(
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        persona!.Role.Should().BeNull();
+        persona.Group.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PutPersona_UpdatesRoleAndGroup()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        var created = await CreatePersonaAsync(userId, "Iris");
+
+        // Act
+        var response = await _client.PutAsJsonAsync(
+            $"/api/personas/{created.Id}?userId={userId}",
+            new UpdatePersonaRequest("Iris", Role: "QA Engineer", Group: "Testing"),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var updated = await response.Content.ReadFromJsonAsync<PersonaDto>(
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        updated!.Role.Should().Be("QA Engineer");
+        updated.Group.Should().Be("Testing");
     }
 
     private async Task<PersonaDto> CreatePersonaAsync(

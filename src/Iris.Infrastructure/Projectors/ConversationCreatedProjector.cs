@@ -23,6 +23,7 @@ namespace Iris.Infrastructure.Projectors
             var conversation = new ConversationReadModel
             {
                 Id = notification.Event.ConversationId,
+                PersonaId = notification.Event.PersonaId,
                 CreatedAt = notification.OccurredAt,
                 Title = notification.Event.Title,
             };

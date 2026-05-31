@@ -23,6 +23,12 @@ public class PersonaConfiguration : IEntityTypeConfiguration<Persona>
         builder.Property(p => p.ModelPreference)
             .HasMaxLength(100);
 
+        builder.Property(p => p.Role)
+            .HasMaxLength(200);
+
+        builder.Property(p => p.Group)
+            .HasMaxLength(100);
+
         builder.Property(p => p.CreatedAt)
             .HasDefaultValueSql("CURRENT_TIMESTAMP");
 

@@ -1,8 +1,7 @@
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
-using Iris.Application.Conversations.Commands.SendMessage;
+using Iris.Application.Conversations.Commands.StartConversationTurn;
 using Iris.Application.Conversations.Queries;
-using Iris.Domain.AiIntegration;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,16 +13,13 @@ public class ConversationsController : ControllerBase
 {
     private readonly IConversationQueries _conversationQueries;
     private readonly IMediator _mediator;
-    private readonly IServiceScopeFactory _scopeFactory;
 
     public ConversationsController(
         IConversationQueries conversationQueries,
-        IMediator mediator,
-        IServiceScopeFactory scopeFactory)
+        IMediator mediator)
     {
         _conversationQueries = conversationQueries;
         _mediator = mediator;
-        _scopeFactory = scopeFactory;
     }
 
     [HttpPost]
@@ -72,42 +68,14 @@ public class ConversationsController : ControllerBase
         [FromBody] ChatRequestDto request,
         CancellationToken ct = default)
     {
-        var command = new SendMessageCommand(
+        var command = new StartConversationTurnCommand(
             id,
             request.UserMessage,
-            ChatRole.User);
+            request.Model,
+            request.ChangeModel,
+            request.ModelParameters);
 
         await _mediator.Send(command, ct);
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                using var scope = _scopeFactory.CreateScope();
-                var orchestrator = scope.ServiceProvider.GetRequiredService<IChatStreamOrchestrator>();
-                await orchestrator.StreamAsync(
-                    id,
-                    request.Model,
-                    request.ModelParameters,
-                    CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                using var scope = _scopeFactory.CreateScope();
-                var logger = scope.ServiceProvider.GetRequiredService<ILogger<ConversationsController>>();
-                logger.LogError(ex, "Background streaming failed for conversation {ConversationId}", id);
-
-                try
-                {
-                    var notifier = scope.ServiceProvider.GetRequiredService<IChatStreamNotifier>();
-                    await notifier.SendErrorAsync(id, "internal_error", "Streaming failed to start.", CancellationToken.None);
-                }
-                catch
-                {
-                    // Best-effort — if SignalR is also broken, just log
-                }
-            }
-        });
 
         return Accepted();
     }

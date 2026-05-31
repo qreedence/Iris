@@ -1,10 +1,8 @@
 using FluentAssertions;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
-using Iris.Application.Conversations.Notifications;
 using Iris.Application.Exceptions;
 using Iris.Domain.Conversations.Events;
-using MediatR;
 using NSubstitute;
 
 namespace Iris.Tests.Unit.Conversations;
@@ -12,10 +10,20 @@ namespace Iris.Tests.Unit.Conversations;
 public class CreateConversationHandlerTests
 {
     private readonly IEventStore _eventStore = Substitute.For<IEventStore>();
-    private readonly IPublisher _publisher = Substitute.For<IPublisher>();
+    private readonly IConversationEventRecorder _eventRecorder = Substitute.For<IConversationEventRecorder>();
 
-    private CreateConversationHandler CreateSut() => new(_eventStore, _publisher);
+    private CreateConversationHandler CreateSut()
+    {
+        _eventRecorder.RecordAsync(
+                Arg.Any<Guid>(),
+                Arg.Any<IEnumerable<ConversationEvent>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<RecordedEvent>>(Array.Empty<RecordedEvent>()));
 
+        _eventRecorder.ClearReceivedCalls();
+
+        return new CreateConversationHandler(_eventStore, _eventRecorder);
+    }
 
     private static CreateConversationCommand CreateValidCommand(
         Guid? conversationId = null,
@@ -29,7 +37,7 @@ public class CreateConversationHandlerTests
     // ── §1 Happy Path ─────────────────────────────────────────────
 
     [Fact]
-    public async Task Handle_ValidCommand_AppendsConversationCreatedEvent()
+    public async Task Handle_ValidCommand_RecordsConversationCreatedEvent()
     {
         // Arrange
         var sut = CreateSut();
@@ -41,19 +49,13 @@ public class CreateConversationHandlerTests
         // Assert
         result.Should().Be(command.ConversationId);
 
-        await _eventStore.Received(1).AppendAsync(
+        await _eventRecorder.Received(1).RecordAsync(
             command.ConversationId,
             Arg.Is<IEnumerable<ConversationEvent>>(events =>
                 events.Count() == 1 &&
                 events.First().GetType() == typeof(ConversationCreated) &&
                 ((ConversationCreated)events.First()).PersonaId == command.PersonaId &&
                 ((ConversationCreated)events.First()).Title == command.Title),
-            Arg.Any<Guid>(),
-            Arg.Any<CancellationToken>());
-
-        await _publisher.Received(1).Publish(
-            Arg.Is<EventNotification<ConversationCreated>>(n =>
-                n.Event.ConversationId == command.ConversationId),
             Arg.Any<CancellationToken>());
     }
 
@@ -76,14 +78,9 @@ public class CreateConversationHandlerTests
         await act.Should().ThrowAsync<ValidationException>()
             .WithMessage("*title*");
 
-        await _eventStore.DidNotReceive().AppendAsync(
+        await _eventRecorder.DidNotReceive().RecordAsync(
             Arg.Any<Guid>(),
             Arg.Any<IEnumerable<ConversationEvent>>(),
-            Arg.Any<Guid>(),
-            Arg.Any<CancellationToken>());
-
-        await _publisher.DidNotReceive().Publish(
-            Arg.Any<INotification>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -101,14 +98,9 @@ public class CreateConversationHandlerTests
         await act.Should().ThrowAsync<ValidationException>()
             .WithMessage("*ConversationId*");
 
-        await _eventStore.DidNotReceive().AppendAsync(
+        await _eventRecorder.DidNotReceive().RecordAsync(
             Arg.Any<Guid>(),
             Arg.Any<IEnumerable<ConversationEvent>>(),
-            Arg.Any<Guid>(),
-            Arg.Any<CancellationToken>());
-
-        await _publisher.DidNotReceive().Publish(
-            Arg.Any<INotification>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -126,14 +118,9 @@ public class CreateConversationHandlerTests
         await act.Should().ThrowAsync<ValidationException>()
             .WithMessage("*PersonaId*");
 
-        await _eventStore.DidNotReceive().AppendAsync(
+        await _eventRecorder.DidNotReceive().RecordAsync(
             Arg.Any<Guid>(),
             Arg.Any<IEnumerable<ConversationEvent>>(),
-            Arg.Any<Guid>(),
-            Arg.Any<CancellationToken>());
-
-        await _publisher.DidNotReceive().Publish(
-            Arg.Any<INotification>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -158,21 +145,16 @@ public class CreateConversationHandlerTests
         await act.Should().ThrowAsync<ValidationException>()
             .WithMessage("*already exists*");
 
-        await _eventStore.DidNotReceive().AppendAsync(
+        await _eventRecorder.DidNotReceive().RecordAsync(
             Arg.Any<Guid>(),
             Arg.Any<IEnumerable<ConversationEvent>>(),
-            Arg.Any<Guid>(),
-            Arg.Any<CancellationToken>());
-
-        await _publisher.DidNotReceive().Publish(
-            Arg.Any<INotification>(),
             Arg.Any<CancellationToken>());
     }
 
-    // ── §3 Event Store Interaction ────────────────────────────────
+    // ── §3 Event Recorder Interaction ───────────────────────────
 
     [Fact]
-    public async Task Handle_ValidCommand_PassesCorrectAggregateIdAndCommandId()
+    public async Task Handle_ValidCommand_PassesCorrectAggregateIdToRecorder()
     {
         // Arrange
         var sut = CreateSut();
@@ -181,11 +163,10 @@ public class CreateConversationHandlerTests
         // Act
         await sut.Handle(command, CancellationToken.None);
 
-        // Assert — aggregateId matches conversationId, commandId is a non-empty Guid
-        await _eventStore.Received(1).AppendAsync(
+        // Assert
+        await _eventRecorder.Received(1).RecordAsync(
             command.ConversationId,
             Arg.Any<IEnumerable<ConversationEvent>>(),
-            Arg.Is<Guid>(id => id != Guid.Empty),
             Arg.Any<CancellationToken>());
     }
 }

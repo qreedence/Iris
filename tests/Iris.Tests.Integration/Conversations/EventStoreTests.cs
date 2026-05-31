@@ -20,7 +20,7 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
     // --- §1: Append + Persist ---
 
     [Fact]
-    public async Task AppendAsync_SingleEvent_PersistsToDatabase()
+    public async Task AppendAsync_SingleEvent_PersistsToDatabaseAndReturnsRecordedMetadata()
     {
         // Arrange
         await using var db = _factory.CreateDbContext();
@@ -30,7 +30,15 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
         var evt = new ConversationCreated(aggregateId, Guid.NewGuid(), "Test Chat");
 
         // Act
-        await sut.AppendAsync(aggregateId, [evt], commandId, TestContext.Current.CancellationToken);
+        var recorded = await sut.AppendAsync(aggregateId, [evt], commandId, TestContext.Current.CancellationToken);
+
+        // Assert — returned metadata comes from the stored event entity
+        var recordedEvent = recorded.Should().ContainSingle().Subject;
+        recordedEvent.Event.Should().Be(evt);
+        recordedEvent.AggregateId.Should().Be(aggregateId);
+        recordedEvent.CommandId.Should().Be(commandId);
+        recordedEvent.OccurredAt.Should().NotBe(default);
+        recordedEvent.SequenceNumber.Should().BeGreaterThan(0);
 
         // Assert — query the table directly to verify persistence
         await using var verifyDb = _factory.CreateDbContext();
@@ -40,11 +48,14 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
         stored.Should().NotBeNull();
         stored!.EventType.Should().Be("ConversationCreated");
         stored.AggregateId.Should().Be(aggregateId);
+        stored.CommandId.Should().Be(commandId);
+        stored.SequenceNumber.Should().Be(recordedEvent.SequenceNumber);
+        stored.OccurredAt.Should().BeCloseTo(recordedEvent.OccurredAt, TimeSpan.FromMilliseconds(1));
         stored.EventData.Should().Contain("Test Chat");
     }
 
     [Fact]
-    public async Task AppendAsync_MultipleEvents_AssignsSequentialSequenceNumbers()
+    public async Task AppendAsync_MultipleEvents_AssignsSequentialSequenceNumbersAndReturnsOrderedMetadata()
     {
         // Arrange
         await using var db = _factory.CreateDbContext();
@@ -59,9 +70,22 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
         };
 
         // Act
-        await sut.AppendAsync(aggregateId, events, commandId, TestContext.Current.CancellationToken);
+        var recorded = await sut.AppendAsync(aggregateId, events, commandId, TestContext.Current.CancellationToken);
 
         // Assert
+        recorded.Should().HaveCount(3);
+        recorded.Select(e => e.Event).Should().Equal(events);
+        recorded.Should().AllSatisfy(e =>
+        {
+            e.AggregateId.Should().Be(aggregateId);
+            e.CommandId.Should().Be(commandId);
+            e.OccurredAt.Should().NotBe(default);
+            e.SequenceNumber.Should().BeGreaterThan(0);
+        });
+        recorded.Select(e => e.OccurredAt).Distinct().Should().ContainSingle("one append call uses one command timestamp");
+        recorded[1].SequenceNumber.Should().Be(recorded[0].SequenceNumber + 1);
+        recorded[2].SequenceNumber.Should().Be(recorded[1].SequenceNumber + 1);
+
         await using var verifyDb = _factory.CreateDbContext();
         var stored = await verifyDb.StoredEvents
             .Where(e => e.AggregateId == aggregateId)
@@ -69,8 +93,7 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
             .ToListAsync(TestContext.Current.CancellationToken);
 
         stored.Should().HaveCount(3);
-        stored[1].SequenceNumber.Should().Be(stored[0].SequenceNumber + 1);
-        stored[2].SequenceNumber.Should().Be(stored[1].SequenceNumber + 1);
+        stored.Select(e => e.SequenceNumber).Should().Equal(recorded.Select(e => e.SequenceNumber));
     }
 
     // --- §2: Load + Ordering ---
@@ -165,13 +188,20 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
         var before = DateTimeOffset.UtcNow;
 
         // Act
-        await sut.AppendAsync(aggregateId, [
+        var recorded = await sut.AppendAsync(aggregateId, [
             new ConversationCreated(aggregateId, Guid.NewGuid(), "Chat"),
         ], commandId, TestContext.Current.CancellationToken);
 
         var after = DateTimeOffset.UtcNow;
 
         // Assert
+        var recordedEvent = recorded.Should().ContainSingle().Subject;
+        recordedEvent.AggregateId.Should().Be(aggregateId);
+        recordedEvent.CommandId.Should().Be(commandId);
+        recordedEvent.OccurredAt.Should().BeOnOrAfter(before);
+        recordedEvent.OccurredAt.Should().BeOnOrBefore(after);
+        recordedEvent.OccurredAt.Offset.Should().Be(TimeSpan.Zero, "timestamp should be UTC");
+
         await using var verifyDb = _factory.CreateDbContext();
         var stored = await verifyDb.StoredEvents
             .SingleAsync(e => e.AggregateId == aggregateId, TestContext.Current.CancellationToken);
@@ -201,6 +231,7 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
             new TurnCompleted(aggregateId, 150, 42),
             new TurnFailed(aggregateId, FailureSource.Provider, "rate_limited", "Rate limit exceeded.", "partial answer"),
             new TurnCancelled(aggregateId, "cancelled partial"),
+            new ModelChanged(aggregateId, "openai/gpt-4.1"),
             new ConversationArchived(aggregateId),
         };
 
@@ -212,7 +243,7 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
         var stream = await readSut.LoadStreamAsync(aggregateId, TestContext.Current.CancellationToken);
 
         // Assert — verify each event deserializes to the correct type with all properties
-        stream.Should().HaveCount(7);
+        stream.Should().HaveCount(8);
 
         var created = stream[0].Should().BeOfType<ConversationCreated>().Subject;
         created.ConversationId.Should().Be(aggregateId);
@@ -240,7 +271,10 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
         var cancelled = stream[5].Should().BeOfType<TurnCancelled>().Subject;
         cancelled.PartialContent.Should().Be("cancelled partial");
 
-        var archived = stream[6].Should().BeOfType<ConversationArchived>().Subject;
+        var modelChanged = stream[6].Should().BeOfType<ModelChanged>().Subject;
+        modelChanged.Model.Should().Be("openai/gpt-4.1");
+
+        var archived = stream[7].Should().BeOfType<ConversationArchived>().Subject;
         archived.ConversationId.Should().Be(aggregateId);
     }
 

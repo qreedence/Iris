@@ -2,11 +2,11 @@ using Iris.Application.AiIntegration.Models;
 
 namespace Iris.Application.Conversations;
 
-public interface IChatStreamOrchestrator
+public interface IConversationTurnPreparer
 {
-    Task StreamAsync(
+    Task<PreparedConversationTurn> PrepareAsync(
         Guid conversationId,
-        string model,
+        string requestedModel,
         bool changeModel,
         ModelParameters? modelParameters,
         CancellationToken ct = default);

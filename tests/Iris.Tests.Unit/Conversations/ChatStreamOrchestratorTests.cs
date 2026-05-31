@@ -4,12 +4,8 @@ using Iris.Application.AiIntegration;
 using Iris.Application.AiIntegration.Exceptions;
 using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations;
-using Iris.Application.Conversations.Notifications;
-using Iris.Application.Exceptions;
-using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
-using MediatR;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 
@@ -17,31 +13,45 @@ namespace Iris.Tests.Unit.Conversations;
 
 public class ChatStreamOrchestratorTests
 {
-    private readonly IEventStore _eventStore = Substitute.For<IEventStore>();
+    private readonly IConversationTurnPreparer _turnPreparer = Substitute.For<IConversationTurnPreparer>();
     private readonly IChatProvider _chatProvider = Substitute.For<IChatProvider>();
     private readonly IChatStreamNotifier _notifier = Substitute.For<IChatStreamNotifier>();
-    private readonly IPersonaService _personaService = Substitute.For<IPersonaService>();
-    private readonly IPublisher _publisher = Substitute.For<IPublisher>();
+    private readonly IConversationEventRecorder _eventRecorder = Substitute.For<IConversationEventRecorder>();
 
-    private ChatStreamOrchestrator CreateSut() =>
-        new(_eventStore, _chatProvider, _notifier, _personaService, _publisher, NullLogger<ChatStreamOrchestrator>.Instance);
+    private ChatStreamOrchestrator CreateSut()
+    {
+        _eventRecorder.RecordAsync(
+                Arg.Any<Guid>(),
+                Arg.Any<IEnumerable<ConversationEvent>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<RecordedEvent>>(Array.Empty<RecordedEvent>()));
+
+        _eventRecorder.ClearReceivedCalls();
+
+        return new(
+            _turnPreparer,
+            _chatProvider,
+            _notifier,
+            _eventRecorder,
+            NullLogger<ChatStreamOrchestrator>.Instance);
+    }
 
     [Fact]
-    public async Task StreamAsync_Success_StreamsChunksAndAppendsCompletionEvents()
+    public async Task StreamAsync_Success_StreamsChunksAndRecordsCompletionEvents()
     {
         // Arrange
         var sut = CreateSut();
         var conversationId = Guid.NewGuid();
-        var personaId = Guid.NewGuid();
-
-        _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
-            .Returns([
-                new ConversationCreated(conversationId, personaId, "Chat"),
-                new MessageSent(Guid.NewGuid(), conversationId, "First user message", ChatRole.User),
-                new AssistantResponseCompleted(Guid.NewGuid(), conversationId, "First assistant response", "test/model"),
-                new MessageSent(Guid.NewGuid(), conversationId, "Second user message", ChatRole.User)
-            ]);
-        SetupPersona(personaId, systemPrompt: "You are Iris.");
+        var chatRequest = new ChatRequest(
+            "test/model",
+            [
+                new ChatMessage(ChatRole.User, "First user message"),
+                new ChatMessage(ChatRole.Assistant, "First assistant response"),
+                new ChatMessage(ChatRole.User, "Second user message")
+            ],
+            "You are Iris.",
+            null);
+        SetupPreparedTurn(conversationId, chatRequest);
 
         _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
             .Returns(call => StreamChunks([
@@ -51,44 +61,56 @@ public class ChatStreamOrchestratorTests
             ], call.ArgAt<CancellationToken>(1)));
 
         // Act
-        await sut.StreamAsync(conversationId, "test/model", null, TestContext.Current.CancellationToken);
+        await sut.StreamAsync(conversationId, "test/model", false, null, TestContext.Current.CancellationToken);
 
         // Assert
-        _chatProvider.Received(1).StreamAsync(
-            Arg.Is<ChatRequest>(request =>
-                request.Model == "test/model" &&
-                request.SystemPrompt == "You are Iris." &&
-                request.Messages.Count == 3 &&
-                request.Messages[0] == new ChatMessage(ChatRole.User, "First user message") &&
-                request.Messages[1] == new ChatMessage(ChatRole.Assistant, "First assistant response") &&
-                request.Messages[2] == new ChatMessage(ChatRole.User, "Second user message")),
-            Arg.Any<CancellationToken>());
+        _chatProvider.Received(1).StreamAsync(chatRequest, Arg.Any<CancellationToken>());
 
         await _notifier.Received(1).SendChunkAsync(conversationId, "Hello", Arg.Any<CancellationToken>());
         await _notifier.Received(1).SendChunkAsync(conversationId, " there", Arg.Any<CancellationToken>());
         await _notifier.Received(1).SendCompletedAsync(conversationId, Arg.Any<CancellationToken>());
 
-        await _eventStore.Received(1).AppendAsync(
+        await _eventRecorder.Received(1).RecordAsync(
             conversationId,
             Arg.Is<IEnumerable<ConversationEvent>>(events => ContainsCompletionEvents(events)),
-            Arg.Any<Guid>(),
-            Arg.Any<CancellationToken>());
-
-        await _publisher.Received(1).Publish(
-            Arg.Is<EventNotification<AssistantResponseCompleted>>(n => n.Event.Content == "Hello there"),
-            Arg.Any<CancellationToken>());
-        await _publisher.Received(1).Publish(
-            Arg.Is<EventNotification<TurnCompleted>>(n => n.Event.InputTokens == 12 && n.Event.OutputTokens == 5),
             Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task StreamAsync_ProviderFailure_AppendsTurnFailedAndSendsError()
+    public async Task StreamAsync_PreStreamEvents_RecordsBeforeStreaming()
     {
         // Arrange
         var sut = CreateSut();
         var conversationId = Guid.NewGuid();
-        SetupExistingConversation(conversationId);
+        var modelChanged = new ModelChanged(conversationId, "new/model");
+        var chatRequest = CreateChatRequest("new/model");
+        SetupPreparedTurn(conversationId, chatRequest, [modelChanged]);
+
+        _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => StreamChunks([
+                new StreamedChunk("response", false, null),
+                new StreamedChunk(null, true, new UsageInfo(1, 1, 2))
+            ], call.ArgAt<CancellationToken>(1)));
+
+        // Act
+        await sut.StreamAsync(conversationId, "new/model", true, null, TestContext.Current.CancellationToken);
+
+        // Assert
+        await _eventRecorder.Received(1).RecordAsync(
+            conversationId,
+            Arg.Is<IEnumerable<ConversationEvent>>(events => events.Single() == modelChanged),
+            Arg.Any<CancellationToken>());
+
+        _chatProvider.Received(1).StreamAsync(chatRequest, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StreamAsync_ProviderFailure_RecordsTurnFailedAndSendsError()
+    {
+        // Arrange
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        SetupPreparedTurn(conversationId);
 
         _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
             .Returns(call => StreamThenThrow(
@@ -96,13 +118,12 @@ public class ChatStreamOrchestratorTests
                 call.ArgAt<CancellationToken>(1)));
 
         // Act
-        await sut.StreamAsync(conversationId, "test/model", null, TestContext.Current.CancellationToken);
+        await sut.StreamAsync(conversationId, "test/model", false, null, TestContext.Current.CancellationToken);
 
         // Assert
-        await _eventStore.Received(1).AppendAsync(
+        await _eventRecorder.Received(1).RecordAsync(
             conversationId,
             Arg.Is<IEnumerable<ConversationEvent>>(events => ContainsRateLimitFailure(events)),
-            Arg.Any<Guid>(),
             Arg.Any<CancellationToken>());
 
         await _notifier.Received(1).SendChunkAsync(conversationId, "partial", Arg.Any<CancellationToken>());
@@ -115,12 +136,12 @@ public class ChatStreamOrchestratorTests
     }
 
     [Fact]
-    public async Task StreamAsync_Cancellation_AppendsTurnCancelledWithPartialContent()
+    public async Task StreamAsync_Cancellation_RecordsTurnCancelledWithPartialContent()
     {
         // Arrange
         var sut = CreateSut();
         var conversationId = Guid.NewGuid();
-        SetupExistingConversation(conversationId);
+        SetupPreparedTurn(conversationId);
 
         _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
             .Returns(call => StreamThenThrow(
@@ -128,13 +149,12 @@ public class ChatStreamOrchestratorTests
                 call.ArgAt<CancellationToken>(1)));
 
         // Act
-        await sut.StreamAsync(conversationId, "test/model", null, TestContext.Current.CancellationToken);
+        await sut.StreamAsync(conversationId, "test/model", false, null, TestContext.Current.CancellationToken);
 
         // Assert
-        await _eventStore.Received(1).AppendAsync(
+        await _eventRecorder.Received(1).RecordAsync(
             conversationId,
             Arg.Is<IEnumerable<ConversationEvent>>(events => ContainsCancellation(events)),
-            Arg.Any<Guid>(),
             CancellationToken.None);
 
         await _notifier.Received(1).SendChunkAsync(conversationId, "partial", Arg.Any<CancellationToken>());
@@ -147,12 +167,12 @@ public class ChatStreamOrchestratorTests
     }
 
     [Fact]
-    public async Task StreamAsync_UnexpectedException_AppendsTurnFailedAndDoesNotEmitSuccessEvents()
+    public async Task StreamAsync_UnexpectedException_RecordsTurnFailedAndDoesNotEmitSuccessEvents()
     {
         // Arrange
         var sut = CreateSut();
         var conversationId = Guid.NewGuid();
-        SetupExistingConversation(conversationId);
+        SetupPreparedTurn(conversationId);
 
         _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
             .Returns(call => StreamThenThrow(
@@ -160,13 +180,12 @@ public class ChatStreamOrchestratorTests
                 call.ArgAt<CancellationToken>(1)));
 
         // Act
-        await sut.StreamAsync(conversationId, "test/model", null, TestContext.Current.CancellationToken);
+        await sut.StreamAsync(conversationId, "test/model", false, null, TestContext.Current.CancellationToken);
 
         // Assert
-        await _eventStore.Received(1).AppendAsync(
+        await _eventRecorder.Received(1).RecordAsync(
             conversationId,
             Arg.Is<IEnumerable<ConversationEvent>>(events => ContainsInternalFailure(events)),
-            Arg.Any<Guid>(),
             CancellationToken.None);
 
         await _notifier.Received(1).SendChunkAsync(conversationId, "partial", Arg.Any<CancellationToken>());
@@ -177,130 +196,32 @@ public class ChatStreamOrchestratorTests
             CancellationToken.None);
         await _notifier.DidNotReceive().SendCompletedAsync(conversationId, Arg.Any<CancellationToken>());
 
-        await _publisher.DidNotReceive().Publish(
-            Arg.Any<EventNotification<AssistantResponseCompleted>>(),
+        await _eventRecorder.DidNotReceive().RecordAsync(
+            Arg.Any<Guid>(),
+            Arg.Is<IEnumerable<ConversationEvent>>(events =>
+                events.OfType<AssistantResponseCompleted>().Any() ||
+                events.OfType<TurnCompleted>().Any()),
             Arg.Any<CancellationToken>());
-        await _publisher.DidNotReceive().Publish(
-            Arg.Any<EventNotification<TurnCompleted>>(),
-            Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task StreamAsync_PersonaHasSystemPrompt_PassesToProvider()
-    {
-        // Arrange
-        var sut = CreateSut();
-        var conversationId = Guid.NewGuid();
-        SetupExistingConversation(conversationId, systemPrompt: "Speak plainly.");
-        ChatRequest? capturedRequest = null;
-
-        _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
-            .Returns(call => CaptureAndStreamResponse(
-                call.Arg<ChatRequest>(),
-                request => capturedRequest = request,
-                call.ArgAt<CancellationToken>(1)));
-
-        // Act
-        await sut.StreamAsync(conversationId, "fallback/model", null, TestContext.Current.CancellationToken);
-
-        // Assert
-        capturedRequest.Should().NotBeNull();
-        capturedRequest!.SystemPrompt.Should().Be("Speak plainly.");
-    }
-
-    [Fact]
-    public async Task StreamAsync_PersonaHasNoSystemPrompt_SendsNullToProvider()
-    {
-        // Arrange
-        var sut = CreateSut();
-        var conversationId = Guid.NewGuid();
-        SetupExistingConversation(conversationId, systemPrompt: null);
-        ChatRequest? capturedRequest = null;
-
-        _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
-            .Returns(call => CaptureAndStreamResponse(
-                call.Arg<ChatRequest>(),
-                request => capturedRequest = request,
-                call.ArgAt<CancellationToken>(1)));
-
-        // Act
-        await sut.StreamAsync(conversationId, "fallback/model", null, TestContext.Current.CancellationToken);
-
-        // Assert
-        capturedRequest.Should().NotBeNull();
-        capturedRequest!.SystemPrompt.Should().BeNull();
-    }
-
-    [Fact]
-    public async Task StreamAsync_PersonaHasModelPreference_UsesPreference()
-    {
-        // Arrange
-        var sut = CreateSut();
-        var conversationId = Guid.NewGuid();
-        SetupExistingConversation(conversationId, modelPreference: "persona/model");
-        ChatRequest? capturedRequest = null;
-
-        _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
-            .Returns(call => CaptureAndStreamResponse(
-                call.Arg<ChatRequest>(),
-                request => capturedRequest = request,
-                call.ArgAt<CancellationToken>(1)));
-
-        // Act
-        await sut.StreamAsync(conversationId, "fallback/model", null, TestContext.Current.CancellationToken);
-
-        // Assert
-        capturedRequest.Should().NotBeNull();
-        capturedRequest!.Model.Should().Be("persona/model");
-    }
-
-    [Fact]
-    public async Task StreamAsync_PersonaHasNoModelPreference_UsesFallbackModel()
-    {
-        // Arrange
-        var sut = CreateSut();
-        var conversationId = Guid.NewGuid();
-        SetupExistingConversation(conversationId, modelPreference: null);
-        ChatRequest? capturedRequest = null;
-
-        _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
-            .Returns(call => CaptureAndStreamResponse(
-                call.Arg<ChatRequest>(),
-                request => capturedRequest = request,
-                call.ArgAt<CancellationToken>(1)));
-
-        // Act
-        await sut.StreamAsync(conversationId, "fallback/model", null, TestContext.Current.CancellationToken);
-
-        // Assert
-        capturedRequest.Should().NotBeNull();
-        capturedRequest!.Model.Should().Be("fallback/model");
-    }
-
-    [Fact]
-    public async Task StreamAsync_PersonaNotFound_AppendsTurnFailed()
+    public async Task StreamAsync_PersonaNotFound_RecordsTurnFailedAndDoesNotStream()
     {
         // Arrange
         var sut = CreateSut();
         var conversationId = Guid.NewGuid();
         var personaId = Guid.NewGuid();
 
-        _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
-            .Returns([
-                new ConversationCreated(conversationId, personaId, "Chat"),
-                new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User)
-            ]);
-        _personaService.GetForConversationAsync(personaId, Arg.Any<CancellationToken>())
-            .Returns<Task<PersonaDto>>(_ => throw new NotFoundException("Persona not found."));
+        _turnPreparer.PrepareAsync(conversationId, Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<ModelParameters?>(), Arg.Any<CancellationToken>())
+            .Returns<Task<PreparedConversationTurn>>(_ => throw new ConversationPersonaNotFoundException(conversationId, personaId));
 
         // Act
-        await sut.StreamAsync(conversationId, "fallback/model", null, TestContext.Current.CancellationToken);
+        await sut.StreamAsync(conversationId, "fallback/model", false, null, TestContext.Current.CancellationToken);
 
         // Assert
-        await _eventStore.Received(1).AppendAsync(
+        await _eventRecorder.Received(1).RecordAsync(
             conversationId,
             Arg.Is<IEnumerable<ConversationEvent>>(events => ContainsPersonaNotFoundFailure(events)),
-            Arg.Any<Guid>(),
             CancellationToken.None);
 
         await _notifier.Received(1).SendErrorAsync(
@@ -312,32 +233,23 @@ public class ChatStreamOrchestratorTests
         _chatProvider.DidNotReceive().StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>());
     }
 
-    private void SetupExistingConversation(
+    private void SetupPreparedTurn(
         Guid conversationId,
-        string? systemPrompt = null,
-        string? modelPreference = null)
+        ChatRequest? chatRequest = null,
+        IReadOnlyList<ConversationEvent>? preStreamEvents = null)
     {
-        var personaId = Guid.NewGuid();
-        _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
-            .Returns([
-                new ConversationCreated(conversationId, personaId, "Chat"),
-                new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User)
-            ]);
-        SetupPersona(personaId, systemPrompt, modelPreference);
+        _turnPreparer.PrepareAsync(conversationId, Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<ModelParameters?>(), Arg.Any<CancellationToken>())
+            .Returns(new PreparedConversationTurn(
+                chatRequest ?? CreateChatRequest(),
+                preStreamEvents ?? []));
     }
 
-    private void SetupPersona(Guid personaId, string? systemPrompt = null, string? modelPreference = null)
-    {
-        _personaService.GetForConversationAsync(personaId, Arg.Any<CancellationToken>())
-            .Returns(new PersonaDto(
-                personaId,
-                "Iris",
-                systemPrompt,
-                modelPreference,
-                null,
-                DateTimeOffset.UtcNow,
-                DateTimeOffset.UtcNow));
-    }
+    private static ChatRequest CreateChatRequest(string model = "test/model") =>
+        new(
+            model,
+            [new ChatMessage(ChatRole.User, "Hello")],
+            null,
+            null);
 
     private static bool ContainsCompletionEvents(IEnumerable<ConversationEvent> events)
     {
@@ -386,21 +298,6 @@ public class ChatStreamOrchestratorTests
             failed.ErrorCode == "persona_not_found" &&
             failed.Message == "The persona for this conversation no longer exists." &&
             failed.PartialContent is null;
-    }
-
-    private static async IAsyncEnumerable<StreamedChunk> CaptureAndStreamResponse(
-        ChatRequest request,
-        Action<ChatRequest> capture,
-        [EnumeratorCancellation] CancellationToken ct = default)
-    {
-        capture(request);
-        await foreach (var chunk in StreamChunks([
-            new StreamedChunk("response", false, null),
-            new StreamedChunk(null, true, new UsageInfo(1, 1, 2))
-        ], ct))
-        {
-            yield return chunk;
-        }
     }
 
     private static async IAsyncEnumerable<StreamedChunk> StreamChunks(

@@ -5,6 +5,8 @@ public record PersonaDto(
     string Name,
     string? SystemPrompt,
     string? ModelPreference,
+    string? Role,
+    string? Group,
     string? Avatar,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

@@ -7,6 +7,7 @@ using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Commands.SendMessage;
 using Iris.Application.Conversations.Queries;
+using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
@@ -97,6 +98,53 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
             TestContext.Current.CancellationToken);
 
         response2.StatusCode.Should().Be(HttpStatusCode.Created);
+    }
+
+    private async Task<PersonaDto> CreatePersonaAsync(string name = "Iris")
+    {
+        using var scope = _factory.Services.CreateScope();
+        var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
+        return await personaService.CreateAsync(
+            new CreatePersonaRequest(Guid.NewGuid(), name),
+            TestContext.Current.CancellationToken);
+    }
+
+    // ── POST /api/conversations — PersonaId on summary ───────────
+
+    [Fact]
+    public async Task GetConversations_IncludesPersonaId()
+    {
+        // Arrange
+        var persona = await CreatePersonaAsync();
+        var conversationId = Guid.NewGuid();
+        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
+
+        // Act
+        var response = await _client.GetAsync("/api/conversations", TestContext.Current.CancellationToken);
+        var conversations = await response.Content
+            .ReadFromJsonAsync<List<ConversationSummaryDto>>(JsonOptions, TestContext.Current.CancellationToken);
+
+        // Assert
+        var conversation = conversations!.First(c => c.Id == conversationId);
+        conversation.PersonaId.Should().Be(persona.Id);
+    }
+
+    [Fact]
+    public async Task GetConversations_CurrentModelIsNullByDefault()
+    {
+        // Arrange
+        var persona = await CreatePersonaAsync();
+        var conversationId = Guid.NewGuid();
+        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
+
+        // Act
+        var response = await _client.GetAsync("/api/conversations", TestContext.Current.CancellationToken);
+        var conversations = await response.Content
+            .ReadFromJsonAsync<List<ConversationSummaryDto>>(JsonOptions, TestContext.Current.CancellationToken);
+
+        // Assert
+        var conversation = conversations!.First(c => c.Id == conversationId);
+        conversation.CurrentModel.Should().BeNull();
     }
 
     // ── §1 GET /api/conversations — empty ─────────────────────────
