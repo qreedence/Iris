@@ -53,14 +53,12 @@ app.UseExceptionHandler(appBuilder =>
         };
 
         context.Response.StatusCode = statusCode;
-        context.Response.ContentType = "application/problem+json";
 
-        await context.Response.WriteAsJsonAsync(new
-        {
-            status = statusCode,
-            title,
-            detail = exception?.Message
-        });
+        await Results.Problem(
+            statusCode: statusCode,
+            title: title,
+            detail: exception?.Message)
+            .ExecuteAsync(context);
     });
 });
 app.UseStatusCodePages();
