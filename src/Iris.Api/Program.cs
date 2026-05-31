@@ -1,3 +1,4 @@
+using Iris.Api.Conversations;
 using Iris.Api.Hubs;
 using Iris.Application;
 using Iris.Application.Conversations;
@@ -30,6 +31,8 @@ builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IChatStreamNotifier, SignalRChatStreamNotifier>();
+builder.Services.AddSingleton<IConversationTurnQueue, ConversationTurnQueue>();
+builder.Services.AddHostedService<ConversationTurnWorker>();
 
 builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
