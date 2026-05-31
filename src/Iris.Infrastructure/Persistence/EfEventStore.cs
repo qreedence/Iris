@@ -16,21 +16,40 @@ public class EfEventStore : IEventStore
         _db = db;
     }
 
-    public async Task AppendAsync(Guid aggregateId, IEnumerable<ConversationEvent> events, Guid commandId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<RecordedEvent>> AppendAsync(
+        Guid aggregateId,
+        IEnumerable<ConversationEvent> events,
+        Guid commandId,
+        CancellationToken ct = default)
     {
+        var occurredAt = DateTimeOffset.UtcNow;
+        var storedEvents = new List<(StoredEvent StoredEvent, ConversationEvent Event)>();
+
         foreach (var evt in events)
         {
-            _db.StoredEvents.Add(new StoredEvent
+            var storedEvent = new StoredEvent
             {
                 AggregateId = aggregateId,
                 CommandId = commandId,
                 EventType = evt.GetType().Name,
                 EventData = JsonSerializer.Serialize(evt, evt.GetType(), SerializerOptions),
-                OccurredAt = DateTimeOffset.UtcNow,
-            });
+                OccurredAt = occurredAt,
+            };
+
+            _db.StoredEvents.Add(storedEvent);
+            storedEvents.Add((storedEvent, evt));
         }
 
         await _db.SaveChangesAsync(ct);
+
+        return storedEvents
+            .Select(e => new RecordedEvent(
+                e.Event,
+                e.StoredEvent.SequenceNumber,
+                e.StoredEvent.AggregateId,
+                e.StoredEvent.CommandId,
+                e.StoredEvent.OccurredAt))
+            .ToList();
     }
 
     public async Task<IReadOnlyList<ConversationEvent>> LoadStreamAsync(Guid aggregateId, CancellationToken ct = default)

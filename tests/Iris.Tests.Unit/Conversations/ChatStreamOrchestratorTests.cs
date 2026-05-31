@@ -4,12 +4,10 @@ using Iris.Application.AiIntegration;
 using Iris.Application.AiIntegration.Exceptions;
 using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations;
-using Iris.Application.Conversations.Notifications;
 using Iris.Application.Exceptions;
 using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
-using MediatR;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 
@@ -21,10 +19,20 @@ public class ChatStreamOrchestratorTests
     private readonly IChatProvider _chatProvider = Substitute.For<IChatProvider>();
     private readonly IChatStreamNotifier _notifier = Substitute.For<IChatStreamNotifier>();
     private readonly IPersonaService _personaService = Substitute.For<IPersonaService>();
-    private readonly IPublisher _publisher = Substitute.For<IPublisher>();
+    private readonly IConversationEventRecorder _eventRecorder = Substitute.For<IConversationEventRecorder>();
 
-    private ChatStreamOrchestrator CreateSut() =>
-        new(_eventStore, _chatProvider, _notifier, _personaService, _publisher, NullLogger<ChatStreamOrchestrator>.Instance);
+    private ChatStreamOrchestrator CreateSut()
+    {
+        _eventRecorder.RecordAsync(
+                Arg.Any<Guid>(),
+                Arg.Any<IEnumerable<ConversationEvent>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<RecordedEvent>>(Array.Empty<RecordedEvent>()));
+
+        _eventRecorder.ClearReceivedCalls();
+
+        return new(_eventStore, _chatProvider, _notifier, _personaService, _eventRecorder, NullLogger<ChatStreamOrchestrator>.Instance);
+    }
 
     [Fact]
     public async Task StreamAsync_Success_StreamsChunksAndAppendsCompletionEvents()
@@ -68,17 +76,9 @@ public class ChatStreamOrchestratorTests
         await _notifier.Received(1).SendChunkAsync(conversationId, " there", Arg.Any<CancellationToken>());
         await _notifier.Received(1).SendCompletedAsync(conversationId, Arg.Any<CancellationToken>());
 
-        await _eventStore.Received(1).AppendAsync(
+        await _eventRecorder.Received(1).RecordAsync(
             conversationId,
             Arg.Is<IEnumerable<ConversationEvent>>(events => ContainsCompletionEvents(events)),
-            Arg.Any<Guid>(),
-            Arg.Any<CancellationToken>());
-
-        await _publisher.Received(1).Publish(
-            Arg.Is<EventNotification<AssistantResponseCompleted>>(n => n.Event.Content == "Hello there"),
-            Arg.Any<CancellationToken>());
-        await _publisher.Received(1).Publish(
-            Arg.Is<EventNotification<TurnCompleted>>(n => n.Event.InputTokens == 12 && n.Event.OutputTokens == 5),
             Arg.Any<CancellationToken>());
     }
 
@@ -99,10 +99,9 @@ public class ChatStreamOrchestratorTests
         await sut.StreamAsync(conversationId, "test/model", null, TestContext.Current.CancellationToken);
 
         // Assert
-        await _eventStore.Received(1).AppendAsync(
+        await _eventRecorder.Received(1).RecordAsync(
             conversationId,
             Arg.Is<IEnumerable<ConversationEvent>>(events => ContainsRateLimitFailure(events)),
-            Arg.Any<Guid>(),
             Arg.Any<CancellationToken>());
 
         await _notifier.Received(1).SendChunkAsync(conversationId, "partial", Arg.Any<CancellationToken>());
@@ -131,10 +130,9 @@ public class ChatStreamOrchestratorTests
         await sut.StreamAsync(conversationId, "test/model", null, TestContext.Current.CancellationToken);
 
         // Assert
-        await _eventStore.Received(1).AppendAsync(
+        await _eventRecorder.Received(1).RecordAsync(
             conversationId,
             Arg.Is<IEnumerable<ConversationEvent>>(events => ContainsCancellation(events)),
-            Arg.Any<Guid>(),
             CancellationToken.None);
 
         await _notifier.Received(1).SendChunkAsync(conversationId, "partial", Arg.Any<CancellationToken>());
@@ -163,10 +161,9 @@ public class ChatStreamOrchestratorTests
         await sut.StreamAsync(conversationId, "test/model", null, TestContext.Current.CancellationToken);
 
         // Assert
-        await _eventStore.Received(1).AppendAsync(
+        await _eventRecorder.Received(1).RecordAsync(
             conversationId,
             Arg.Is<IEnumerable<ConversationEvent>>(events => ContainsInternalFailure(events)),
-            Arg.Any<Guid>(),
             CancellationToken.None);
 
         await _notifier.Received(1).SendChunkAsync(conversationId, "partial", Arg.Any<CancellationToken>());
@@ -177,11 +174,11 @@ public class ChatStreamOrchestratorTests
             CancellationToken.None);
         await _notifier.DidNotReceive().SendCompletedAsync(conversationId, Arg.Any<CancellationToken>());
 
-        await _publisher.DidNotReceive().Publish(
-            Arg.Any<EventNotification<AssistantResponseCompleted>>(),
-            Arg.Any<CancellationToken>());
-        await _publisher.DidNotReceive().Publish(
-            Arg.Any<EventNotification<TurnCompleted>>(),
+        await _eventRecorder.DidNotReceive().RecordAsync(
+            Arg.Any<Guid>(),
+            Arg.Is<IEnumerable<ConversationEvent>>(events =>
+                events.OfType<AssistantResponseCompleted>().Any() ||
+                events.OfType<TurnCompleted>().Any()),
             Arg.Any<CancellationToken>());
     }
 
@@ -253,8 +250,9 @@ public class ChatStreamOrchestratorTests
         capturedRequest.Should().NotBeNull();
         capturedRequest!.Model.Should().Be("persona/model");
 
-        await _publisher.DidNotReceive().Publish(
-            Arg.Any<EventNotification<ModelChanged>>(),
+        await _eventRecorder.DidNotReceive().RecordAsync(
+            Arg.Any<Guid>(),
+            Arg.Is<IEnumerable<ConversationEvent>>(events => events.OfType<ModelChanged>().Any()),
             Arg.Any<CancellationToken>());
     }
 
@@ -301,10 +299,9 @@ public class ChatStreamOrchestratorTests
         await sut.StreamAsync(conversationId, "fallback/model", null, TestContext.Current.CancellationToken);
 
         // Assert
-        await _eventStore.Received(1).AppendAsync(
+        await _eventRecorder.Received(1).RecordAsync(
             conversationId,
             Arg.Is<IEnumerable<ConversationEvent>>(events => ContainsPersonaNotFoundFailure(events)),
-            Arg.Any<Guid>(),
             CancellationToken.None);
 
         await _notifier.Received(1).SendErrorAsync(
@@ -335,15 +332,10 @@ public class ChatStreamOrchestratorTests
         await sut.StreamAsync(conversationId, "new/model", null, TestContext.Current.CancellationToken);
 
         // Assert — ModelChanged event emitted
-        await _eventStore.Received(1).AppendAsync(
+        await _eventRecorder.Received(1).RecordAsync(
             conversationId,
             Arg.Is<IEnumerable<ConversationEvent>>(events =>
                 events.OfType<ModelChanged>().Any(e => e.Model == "new/model")),
-            Arg.Any<Guid>(),
-            Arg.Any<CancellationToken>());
-
-        await _publisher.Received(1).Publish(
-            Arg.Is<EventNotification<ModelChanged>>(n => n.Event.Model == "new/model"),
             Arg.Any<CancellationToken>());
 
         // Streaming uses the new model
@@ -369,15 +361,15 @@ public class ChatStreamOrchestratorTests
         await sut.StreamAsync(conversationId, "persona/model", null, TestContext.Current.CancellationToken);
 
         // Assert — no ModelChanged emitted
-        await _eventStore.DidNotReceive().AppendAsync(
+        await _eventRecorder.DidNotReceive().RecordAsync(
             conversationId,
             Arg.Is<IEnumerable<ConversationEvent>>(events =>
                 events.OfType<ModelChanged>().Any()),
-            Arg.Any<Guid>(),
             Arg.Any<CancellationToken>());
 
-        await _publisher.DidNotReceive().Publish(
-            Arg.Any<EventNotification<ModelChanged>>(),
+        await _eventRecorder.DidNotReceive().RecordAsync(
+            Arg.Any<Guid>(),
+            Arg.Is<IEnumerable<ConversationEvent>>(events => events.OfType<ModelChanged>().Any()),
             Arg.Any<CancellationToken>());
     }
 
@@ -412,8 +404,9 @@ public class ChatStreamOrchestratorTests
         capturedRequest!.Model.Should().Be("changed/model");
 
         // No new ModelChanged emitted (request matches)
-        await _publisher.DidNotReceive().Publish(
-            Arg.Any<EventNotification<ModelChanged>>(),
+        await _eventRecorder.DidNotReceive().RecordAsync(
+            Arg.Any<Guid>(),
+            Arg.Is<IEnumerable<ConversationEvent>>(events => events.OfType<ModelChanged>().Any()),
             Arg.Any<CancellationToken>());
     }
 
@@ -444,8 +437,10 @@ public class ChatStreamOrchestratorTests
         await sut.StreamAsync(conversationId, "newer/model", null, TestContext.Current.CancellationToken);
 
         // Assert — emits new ModelChanged, uses newer model
-        await _publisher.Received(1).Publish(
-            Arg.Is<EventNotification<ModelChanged>>(n => n.Event.Model == "newer/model"),
+        await _eventRecorder.Received(1).RecordAsync(
+            conversationId,
+            Arg.Is<IEnumerable<ConversationEvent>>(events =>
+                events.OfType<ModelChanged>().Any(e => e.Model == "newer/model")),
             Arg.Any<CancellationToken>());
 
         capturedRequest.Should().NotBeNull();

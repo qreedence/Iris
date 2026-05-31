@@ -1,12 +1,9 @@
 using FluentAssertions;
 using Iris.Application.Conversations;
-using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Commands.SendMessage;
-using Iris.Application.Conversations.Notifications;
 using Iris.Application.Exceptions;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
-using MediatR;
 using NSubstitute;
 
 namespace Iris.Tests.Unit.Conversations;
@@ -14,9 +11,20 @@ namespace Iris.Tests.Unit.Conversations;
 public class SendMessageHandlerTests
 {
     private readonly IEventStore _eventStore = Substitute.For<IEventStore>();
-    private readonly IPublisher _publisher = Substitute.For<IPublisher>();
+    private readonly IConversationEventRecorder _eventRecorder = Substitute.For<IConversationEventRecorder>();
 
-    private SendMessageHandler CreateSut() => new(_eventStore, _publisher);
+    private SendMessageHandler CreateSut()
+    {
+        _eventRecorder.RecordAsync(
+                Arg.Any<Guid>(),
+                Arg.Any<IEnumerable<ConversationEvent>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<RecordedEvent>>(Array.Empty<RecordedEvent>()));
+
+        _eventRecorder.ClearReceivedCalls();
+
+        return new SendMessageHandler(_eventStore, _eventRecorder);
+    }
 
     private static SendMessageCommand CreateValidCommand(
         Guid? conversationId = null,
@@ -43,7 +51,7 @@ public class SendMessageHandlerTests
     // ── §1 Happy Path ─────────────────────────────────────────────
 
     [Fact]
-    public async Task Handle_ValidCommand_AppendsMessageSentEvent()
+    public async Task Handle_ValidCommand_RecordsMessageSentEvent()
     {
         // Arrange
         var sut = CreateSut();
@@ -55,7 +63,7 @@ public class SendMessageHandlerTests
         await sut.Handle(command, CancellationToken.None);
 
         // Assert
-        await _eventStore.Received(1).AppendAsync(
+        await _eventRecorder.Received(1).RecordAsync(
             conversationId,
             Arg.Is<IEnumerable<ConversationEvent>>(events =>
                 events.Count() == 1 &&
@@ -63,12 +71,6 @@ public class SendMessageHandlerTests
                 ((MessageSent)events.First()).ConversationId == conversationId &&
                 ((MessageSent)events.First()).Content == command.Content &&
                 ((MessageSent)events.First()).Role == command.Role),
-            Arg.Any<Guid>(),
-            Arg.Any<CancellationToken>());
-
-        await _publisher.Received(1).Publish(
-            Arg.Is<EventNotification<MessageSent>>(n =>
-                n.Event.ConversationId == conversationId),
             Arg.Any<CancellationToken>());
     }
 
@@ -93,14 +95,9 @@ public class SendMessageHandlerTests
         await act.Should().ThrowAsync<ValidationException>()
             .WithMessage("*Content*");
 
-        await _eventStore.DidNotReceive().AppendAsync(
+        await _eventRecorder.DidNotReceive().RecordAsync(
             Arg.Any<Guid>(),
             Arg.Any<IEnumerable<ConversationEvent>>(),
-            Arg.Any<Guid>(),
-            Arg.Any<CancellationToken>());
-
-        await _publisher.DidNotReceive().Publish(
-            Arg.Any<INotification>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -122,21 +119,16 @@ public class SendMessageHandlerTests
         await act.Should().ThrowAsync<NotFoundException>()
             .WithMessage("*does not exist*");
 
-        await _eventStore.DidNotReceive().AppendAsync(
+        await _eventRecorder.DidNotReceive().RecordAsync(
             Arg.Any<Guid>(),
             Arg.Any<IEnumerable<ConversationEvent>>(),
-            Arg.Any<Guid>(),
-            Arg.Any<CancellationToken>());
-
-        await _publisher.DidNotReceive().Publish(
-            Arg.Any<INotification>(),
             Arg.Any<CancellationToken>());
     }
 
-    // ── §3 Event Store Interaction ────────────────────────────────
+    // ── §3 Event Recorder Interaction ───────────────────────────
 
     [Fact]
-    public async Task Handle_ValidCommand_PassesCorrectAggregateIdAndCommandId()
+    public async Task Handle_ValidCommand_PassesCorrectAggregateIdToRecorder()
     {
         // Arrange
         var sut = CreateSut();
@@ -148,10 +140,9 @@ public class SendMessageHandlerTests
         await sut.Handle(command, CancellationToken.None);
 
         // Assert
-        await _eventStore.Received(1).AppendAsync(
+        await _eventRecorder.Received(1).RecordAsync(
             conversationId,
             Arg.Any<IEnumerable<ConversationEvent>>(),
-            Arg.Is<Guid>(id => id != Guid.Empty),
             Arg.Any<CancellationToken>());
     }
 
@@ -172,12 +163,11 @@ public class SendMessageHandlerTests
         await sut.Handle(command, CancellationToken.None);
 
         // Assert
-        await _eventStore.Received(1).AppendAsync(
+        await _eventRecorder.Received(1).RecordAsync(
             Arg.Any<Guid>(),
             Arg.Is<IEnumerable<ConversationEvent>>(events =>
                 events.First().GetType() == typeof(MessageSent) &&
                 ((MessageSent)events.First()).Role == role),
-            Arg.Any<Guid>(),
             Arg.Any<CancellationToken>());
     }
 }

@@ -8,6 +8,7 @@ namespace Iris.Application
         {
             services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(DependencyInjection).Assembly));
             services.AddScoped<Conversations.IChatStreamOrchestrator, Conversations.ChatStreamOrchestrator>();
+            services.AddScoped<Conversations.IConversationEventRecorder, Conversations.ConversationEventRecorder>();
             return services;
         }
     }

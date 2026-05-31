@@ -1,4 +1,3 @@
-﻿using Iris.Application.Conversations.Notifications;
 using Iris.Application.Exceptions;
 using Iris.Domain.Conversations.Events;
 using MediatR;
@@ -8,12 +7,12 @@ namespace Iris.Application.Conversations.Commands.CreateConversation
     public class CreateConversationHandler : IRequestHandler<CreateConversationCommand, Guid>
     {
         private readonly IEventStore _eventStore;
-        private readonly IPublisher _publisher;
+        private readonly IConversationEventRecorder _eventRecorder;
         
-        public CreateConversationHandler(IEventStore eventStore, IPublisher publisher)
+        public CreateConversationHandler(IEventStore eventStore, IConversationEventRecorder eventRecorder)
         {
             _eventStore = eventStore;
-            _publisher = publisher;
+            _eventRecorder = eventRecorder;
         }
 
         public async Task<Guid> Handle(CreateConversationCommand command, CancellationToken ct)
@@ -32,8 +31,7 @@ namespace Iris.Application.Conversations.Commands.CreateConversation
                 throw new ValidationException("Conversation already exists.");
 
             var conversation = new ConversationCreated(command.ConversationId, command.PersonaId, command.Title);
-            await _eventStore.AppendAsync(command.ConversationId, [conversation], Guid.NewGuid(), ct);
-            await _publisher.Publish(new EventNotification<ConversationCreated>(conversation, DateTimeOffset.UtcNow), ct);
+            await _eventRecorder.RecordAsync(command.ConversationId, [conversation], ct);
             return conversation.ConversationId;
         }
     }
