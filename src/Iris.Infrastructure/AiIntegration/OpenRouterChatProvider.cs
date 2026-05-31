@@ -64,20 +64,12 @@ public class OpenRouterChatProvider : IChatProvider
         ChatRequest request,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var content = JsonContent.Create(MapToOpenRouterRequest(request, true), options: _jsonOptions);
-
-        using var response = await _httpClient.SendAsync(
-            new HttpRequestMessage(HttpMethod.Post, "/api/v1/responses") { Content = content },
-            HttpCompletionOption.ResponseHeadersRead,
-            ct);
-
-        await EnsureSuccessAsync(response, ct);
-
-        using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var response = await SendStreamRequestAsync(request, ct);
+        using var stream = await ReadStreamAsync(response, ct);
         using var reader = new StreamReader(stream);
 
         string? line;
-        while ((line = await reader.ReadLineAsync(ct)) != null)
+        while ((line = await ReadLineAsync(reader, ct)) != null)
         {
             if (string.IsNullOrEmpty(line) || !line.StartsWith("data: "))
                 continue;
@@ -85,6 +77,54 @@ public class OpenRouterChatProvider : IChatProvider
             var chunk = ParseStreamEvent(line["data: ".Length..]);
             if (chunk is not null)
                 yield return chunk;
+        }
+    }
+
+    private async Task<HttpResponseMessage> SendStreamRequestAsync(ChatRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var content = JsonContent.Create(MapToOpenRouterRequest(request, true), options: _jsonOptions);
+
+            var response = await _httpClient.SendAsync(
+                new HttpRequestMessage(HttpMethod.Post, "/api/v1/responses") { Content = content },
+                HttpCompletionOption.ResponseHeadersRead,
+                ct);
+
+            await EnsureSuccessAsync(response, ct);
+            return response;
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new ChatTimeoutException("OpenRouter streaming request timed out", ex);
+        }
+        catch (JsonException ex)
+        {
+            throw new ChatDeserializationException("Failed to serialize OpenRouter streaming request", ex);
+        }
+    }
+
+    private static async Task<Stream> ReadStreamAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            return await response.Content.ReadAsStreamAsync(ct);
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new ChatTimeoutException("OpenRouter streaming response timed out", ex);
+        }
+    }
+
+    private static async Task<string?> ReadLineAsync(StreamReader reader, CancellationToken ct)
+    {
+        try
+        {
+            return await reader.ReadLineAsync(ct);
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new ChatTimeoutException("OpenRouter streaming response timed out", ex);
         }
     }
 
@@ -120,6 +160,14 @@ public class OpenRouterChatProvider : IChatProvider
             return null;
         }
         catch (JsonException ex)
+        {
+            throw new ChatDeserializationException("Failed to deserialize OpenRouter stream event", ex);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            throw new ChatDeserializationException("Failed to deserialize OpenRouter stream event", ex);
+        }
+        catch (InvalidOperationException ex)
         {
             throw new ChatDeserializationException("Failed to deserialize OpenRouter stream event", ex);
         }

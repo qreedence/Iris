@@ -425,6 +425,24 @@ public class OpenRouterChatProviderTests
     }
 
     [Fact]
+    public async Task StreamAsync_Timeout_ThrowsTimeoutException()
+    {
+        var client = new HttpClient(new TimeoutHandler())
+        {
+            BaseAddress = new Uri("https://openrouter.ai")
+        };
+        var sut = new OpenRouterChatProvider(client);
+
+        var act = async () =>
+        {
+            await foreach (var chunk in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+            { }
+        };
+
+        await act.Should().ThrowAsync<ChatTimeoutException>();
+    }
+
+    [Fact]
     public async Task StreamAsync_ServerError500_ThrowsProviderException()
     {
         var handler = new MockHttpHandler(new HttpResponseMessage(HttpStatusCode.InternalServerError)
@@ -440,6 +458,37 @@ public class OpenRouterChatProviderTests
         };
 
         await act.Should().ThrowAsync<ChatProviderException>();
+    }
+
+    [Fact]
+    public async Task StreamAsync_MalformedEvent_ThrowsDeserializationException()
+    {
+        var response = CreateStreamResponse("data: not-json");
+        var (sut, _) = CreateProvider(response);
+
+        var act = async () =>
+        {
+            await foreach (var chunk in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+            { }
+        };
+
+        await act.Should().ThrowAsync<ChatDeserializationException>();
+    }
+
+    [Fact]
+    public async Task StreamAsync_MalformedCompletedUsage_ThrowsDeserializationException()
+    {
+        var response = CreateStreamResponse(
+            "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{}}}");
+        var (sut, _) = CreateProvider(response);
+
+        var act = async () =>
+        {
+            await foreach (var chunk in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+            { }
+        };
+
+        await act.Should().ThrowAsync<ChatDeserializationException>();
     }
 
     // --- §5: Request Headers ---
