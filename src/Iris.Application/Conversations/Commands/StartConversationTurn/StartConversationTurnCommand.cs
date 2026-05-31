@@ -7,4 +7,5 @@ public record StartConversationTurnCommand(
     Guid ConversationId,
     string UserMessage,
     string Model,
+    bool ChangeModel,
     ModelParameters? ModelParameters) : IRequest<Unit>;

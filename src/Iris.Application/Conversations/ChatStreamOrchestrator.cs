@@ -32,13 +32,14 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
     public async Task StreamAsync(
         Guid conversationId,
         string model,
+        bool changeModel,
         ModelParameters? modelParameters,
         CancellationToken ct = default)
     {
         PreparedConversationTurn preparedTurn;
         try
         {
-            preparedTurn = await _turnPreparer.PrepareAsync(conversationId, model, modelParameters, ct);
+            preparedTurn = await _turnPreparer.PrepareAsync(conversationId, model, changeModel, modelParameters, ct);
         }
         catch (ConversationPersonaNotFoundException ex)
         {

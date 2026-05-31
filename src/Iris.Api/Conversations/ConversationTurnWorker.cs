@@ -43,6 +43,7 @@ public class ConversationTurnWorker : BackgroundService
             await orchestrator.StreamAsync(
                 workItem.ConversationId,
                 workItem.Model,
+                workItem.ChangeModel,
                 workItem.ModelParameters,
                 stoppingToken);
         }

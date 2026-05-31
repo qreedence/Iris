@@ -72,6 +72,7 @@ public class ConversationsController : ControllerBase
             id,
             request.UserMessage,
             request.Model,
+            request.ChangeModel,
             request.ModelParameters);
 
         await _mediator.Send(command, ct);

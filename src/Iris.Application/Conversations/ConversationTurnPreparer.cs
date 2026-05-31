@@ -20,9 +20,13 @@ public class ConversationTurnPreparer : IConversationTurnPreparer
     public async Task<PreparedConversationTurn> PrepareAsync(
         Guid conversationId,
         string requestedModel,
+        bool changeModel,
         ModelParameters? modelParameters,
         CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(requestedModel))
+            throw new ValidationException("Model can not be empty.");
+
         var events = await _eventStore.LoadStreamAsync(conversationId, ct);
         if (events.Count == 0)
             throw new NotFoundException("Conversation does not exist.");
@@ -43,12 +47,12 @@ public class ConversationTurnPreparer : IConversationTurnPreparer
 
         var preStreamEvents = new List<ConversationEvent>();
 
-        // Model resolution: ModelChanged (explicit override) > persona preference > request fallback
+        // Model resolution: existing conversation override > persona preference > request fallback.
+        // A new ModelChanged event is recorded only when the request explicitly says so.
         var latestModelChanged = events.OfType<ModelChanged>().LastOrDefault()?.Model;
         var effectiveModel = latestModelChanged ?? persona.ModelPreference ?? requestedModel;
 
-        // If the request model differs from the effective model, the user is switching.
-        if (requestedModel != effectiveModel)
+        if (changeModel)
         {
             preStreamEvents.Add(new ModelChanged(conversationId, requestedModel));
             effectiveModel = requestedModel;

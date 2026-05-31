@@ -29,6 +29,9 @@ public class StartConversationTurnHandler : IRequestHandler<StartConversationTur
         if (string.IsNullOrWhiteSpace(command.UserMessage))
             throw new ValidationException("Content can not be empty.");
 
+        if (string.IsNullOrWhiteSpace(command.Model))
+            throw new ValidationException("Model can not be empty.");
+
         var events = await _eventStore.LoadStreamAsync(command.ConversationId, ct);
         if (events.Count == 0)
             throw new NotFoundException("Conversation does not exist.");
@@ -45,6 +48,7 @@ public class StartConversationTurnHandler : IRequestHandler<StartConversationTur
             new ConversationTurnWorkItem(
                 command.ConversationId,
                 command.Model,
+                command.ChangeModel,
                 command.ModelParameters),
             ct);
 

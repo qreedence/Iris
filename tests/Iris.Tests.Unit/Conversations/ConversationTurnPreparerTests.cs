@@ -38,6 +38,7 @@ public class ConversationTurnPreparerTests
         var prepared = await sut.PrepareAsync(
             conversationId,
             "fallback/model",
+            changeModel: false,
             modelParameters,
             TestContext.Current.CancellationToken);
 
@@ -67,7 +68,31 @@ public class ConversationTurnPreparerTests
         var prepared = await sut.PrepareAsync(
             conversationId,
             "persona/model",
-            null,
+            changeModel: false,
+            modelParameters: null,
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        prepared.ChatRequest.Model.Should().Be("persona/model");
+        prepared.PreStreamEvents.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PrepareAsync_PersonaHasModelPreferenceAndChangeModelFalse_UsesPreferenceEvenWhenRequestDiffers()
+    {
+        // Arrange
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
+        SetupExistingConversation(conversationId, personaId);
+        SetupPersona(personaId, modelPreference: "persona/model");
+
+        // Act
+        var prepared = await sut.PrepareAsync(
+            conversationId,
+            "frontend/fallback",
+            changeModel: false,
+            modelParameters: null,
             TestContext.Current.CancellationToken);
 
         // Assert
@@ -89,7 +114,8 @@ public class ConversationTurnPreparerTests
         var prepared = await sut.PrepareAsync(
             conversationId,
             "fallback/model",
-            null,
+            changeModel: false,
+            modelParameters: null,
             TestContext.Current.CancellationToken);
 
         // Assert
@@ -98,7 +124,7 @@ public class ConversationTurnPreparerTests
     }
 
     [Fact]
-    public async Task PrepareAsync_ModelDiffersFromEffective_ReturnsModelChangedPreStreamEvent()
+    public async Task PrepareAsync_ChangeModelTrue_ReturnsModelChangedPreStreamEvent()
     {
         // Arrange
         var sut = CreateSut();
@@ -111,7 +137,8 @@ public class ConversationTurnPreparerTests
         var prepared = await sut.PrepareAsync(
             conversationId,
             "new/model",
-            null,
+            changeModel: true,
+            modelParameters: null,
             TestContext.Current.CancellationToken);
 
         // Assert
@@ -139,7 +166,8 @@ public class ConversationTurnPreparerTests
         var prepared = await sut.PrepareAsync(
             conversationId,
             "changed/model",
-            null,
+            changeModel: false,
+            modelParameters: null,
             TestContext.Current.CancellationToken);
 
         // Assert
@@ -166,7 +194,8 @@ public class ConversationTurnPreparerTests
         var prepared = await sut.PrepareAsync(
             conversationId,
             "newer/model",
-            null,
+            changeModel: true,
+            modelParameters: null,
             TestContext.Current.CancellationToken);
 
         // Assert
@@ -190,7 +219,8 @@ public class ConversationTurnPreparerTests
         var act = () => sut.PrepareAsync(
             conversationId,
             "fallback/model",
-            null,
+            changeModel: false,
+            modelParameters: null,
             TestContext.Current.CancellationToken);
 
         // Assert
@@ -212,12 +242,36 @@ public class ConversationTurnPreparerTests
         var act = () => sut.PrepareAsync(
             conversationId,
             "fallback/model",
-            null,
+            changeModel: false,
+            modelParameters: null,
             TestContext.Current.CancellationToken);
 
         // Assert
         await act.Should().ThrowAsync<NotFoundException>()
             .WithMessage("*does not exist*");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task PrepareAsync_EmptyRequestedModel_ThrowsValidationException(string? requestedModel)
+    {
+        // Arrange
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+
+        // Act
+        var act = () => sut.PrepareAsync(
+            conversationId,
+            requestedModel!,
+            changeModel: false,
+            modelParameters: null,
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        await act.Should().ThrowAsync<ValidationException>()
+            .WithMessage("*Model*");
     }
 
     private void SetupExistingConversation(Guid conversationId, Guid personaId)

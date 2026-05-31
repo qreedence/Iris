@@ -38,11 +38,13 @@ public class StartConversationTurnHandlerTests
         Guid? conversationId = null,
         string userMessage = "Hello!",
         string model = "test/model",
+        bool changeModel = false,
         ModelParameters? modelParameters = null) =>
         new(
             conversationId ?? Guid.NewGuid(),
             userMessage,
             model,
+            changeModel,
             modelParameters);
 
     private void SetupExistingConversation(Guid conversationId)
@@ -64,6 +66,7 @@ public class StartConversationTurnHandlerTests
             conversationId: conversationId,
             userMessage: "Hello from the user",
             model: "test/model",
+            changeModel: true,
             modelParameters: modelParameters);
         SetupExistingConversation(conversationId);
         var sut = CreateSut();
@@ -86,7 +89,37 @@ public class StartConversationTurnHandlerTests
             Arg.Is<ConversationTurnWorkItem>(workItem =>
                 workItem.ConversationId == conversationId &&
                 workItem.Model == command.Model &&
+                workItem.ChangeModel == command.ChangeModel &&
                 workItem.ModelParameters == modelParameters),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Handle_EmptyModel_ThrowsValidationException(string? model)
+    {
+        // Arrange
+        var conversationId = Guid.NewGuid();
+        SetupExistingConversation(conversationId);
+        var sut = CreateSut();
+        var command = CreateValidCommand(conversationId: conversationId, model: model!);
+
+        // Act
+        var act = () => sut.Handle(command, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<ValidationException>()
+            .WithMessage("*Model*");
+
+        await _eventRecorder.DidNotReceive().RecordAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<IEnumerable<ConversationEvent>>(),
+            Arg.Any<CancellationToken>());
+
+        await _turnQueue.DidNotReceive().EnqueueAsync(
+            Arg.Any<ConversationTurnWorkItem>(),
             Arg.Any<CancellationToken>());
     }
 

@@ -7,6 +7,7 @@ public interface IChatStreamOrchestrator
     Task StreamAsync(
         Guid conversationId,
         string model,
+        bool changeModel,
         ModelParameters? modelParameters,
         CancellationToken ct = default);
 }
