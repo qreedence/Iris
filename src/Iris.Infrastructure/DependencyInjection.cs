@@ -8,6 +8,7 @@ using Iris.Infrastructure.Personas;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Iris.Infrastructure
 {
@@ -21,14 +22,18 @@ namespace Iris.Infrastructure
             options.UseNpgsql(configuration.GetConnectionString("DefaultConnection")));
 
             // OpenRouter
-            services.Configure<OpenRouterOptions>(
-                configuration.GetSection(OpenRouterOptions.SectionName));
+            services.AddOptions<OpenRouterOptions>()
+                .Bind(configuration.GetSection(OpenRouterOptions.SectionName))
+                .Validate(options => !string.IsNullOrWhiteSpace(options.ApiKey), "OpenRouter ApiKey is required.")
+                .Validate(options => Uri.IsWellFormedUriString(options.BaseUrl, UriKind.Absolute), "OpenRouter BaseUrl must be an absolute URI.")
+                .Validate(options => !string.IsNullOrWhiteSpace(options.AppUrl), "OpenRouter AppUrl is required.")
+                .Validate(options => Uri.IsWellFormedUriString(options.AppUrl, UriKind.Absolute), "OpenRouter AppUrl must be an absolute URI.")
+                .Validate(options => !string.IsNullOrWhiteSpace(options.AppTitle), "OpenRouter AppTitle is required.")
+                .ValidateOnStart();
 
             services.AddHttpClient<IChatProvider, OpenRouterChatProvider>((sp, client) =>
             {
-                var options = configuration
-                    .GetSection(OpenRouterOptions.SectionName)
-                    .Get<OpenRouterOptions>()!;
+                var options = sp.GetRequiredService<IOptions<OpenRouterOptions>>().Value;
 
                 client.BaseAddress = new Uri(options.BaseUrl);
                 client.DefaultRequestHeaders.Add("Authorization", $"Bearer {options.ApiKey}");
