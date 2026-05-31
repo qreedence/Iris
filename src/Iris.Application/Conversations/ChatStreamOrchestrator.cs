@@ -2,9 +2,6 @@ using System.Text;
 using Iris.Application.AiIntegration;
 using Iris.Application.AiIntegration.Exceptions;
 using Iris.Application.AiIntegration.Models;
-using Iris.Application.Exceptions;
-using Iris.Application.Personas;
-using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
 using Microsoft.Extensions.Logging;
 
@@ -12,25 +9,22 @@ namespace Iris.Application.Conversations;
 
 public class ChatStreamOrchestrator : IChatStreamOrchestrator
 {
-    private readonly IEventStore _eventStore;
+    private readonly IConversationTurnPreparer _turnPreparer;
     private readonly IChatProvider _chatProvider;
     private readonly IChatStreamNotifier _notifier;
-    private readonly IPersonaService _personaService;
     private readonly IConversationEventRecorder _eventRecorder;
     private readonly ILogger<ChatStreamOrchestrator> _logger;
 
     public ChatStreamOrchestrator(
-        IEventStore eventStore,
+        IConversationTurnPreparer turnPreparer,
         IChatProvider chatProvider,
         IChatStreamNotifier notifier,
-        IPersonaService personaService,
         IConversationEventRecorder eventRecorder,
         ILogger<ChatStreamOrchestrator> logger)
     {
-        _eventStore = eventStore;
+        _turnPreparer = turnPreparer;
         _chatProvider = chatProvider;
         _notifier = notifier;
-        _personaService = personaService;
         _eventRecorder = eventRecorder;
         _logger = logger;
     }
@@ -41,20 +35,12 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
         ModelParameters? modelParameters,
         CancellationToken ct = default)
     {
-        var events = await _eventStore.LoadStreamAsync(conversationId, ct);
-        if (events.Count == 0)
-            throw new NotFoundException("Conversation does not exist.");
-
-        var conversationCreated = events.OfType<ConversationCreated>().FirstOrDefault();
-        if (conversationCreated is null)
-            throw new NotFoundException("Conversation does not exist.");
-
-        PersonaDto persona;
+        PreparedConversationTurn preparedTurn;
         try
         {
-            persona = await _personaService.GetForConversationAsync(conversationCreated.PersonaId, ct);
+            preparedTurn = await _turnPreparer.PrepareAsync(conversationId, model, modelParameters, ct);
         }
-        catch (NotFoundException)
+        catch (ConversationPersonaNotFoundException ex)
         {
             var turnFailed = new TurnFailed(
                 conversationId,
@@ -72,36 +58,23 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
 
             _logger.LogWarning(
                 "Persona {PersonaId} for conversation {ConversationId} was not found",
-                conversationCreated.PersonaId,
+                ex.PersonaId,
                 conversationId);
 
             return;
         }
 
-        // Model resolution: ModelChanged (explicit override) > persona preference > request fallback
-        var latestModelChanged = events.OfType<ModelChanged>().LastOrDefault()?.Model;
-        var effectiveModel = latestModelChanged ?? persona.ModelPreference ?? model;
-
-        // If the request model differs from the effective model, the user is switching
-        if (model != effectiveModel)
+        if (preparedTurn.PreStreamEvents.Count > 0)
         {
-            var modelChanged = new ModelChanged(conversationId, model);
-            await _eventRecorder.RecordAsync(conversationId, [modelChanged], ct);
-            effectiveModel = model;
+            await _eventRecorder.RecordAsync(conversationId, preparedTurn.PreStreamEvents, ct);
         }
-
-        var chatRequest = new ChatRequest(
-            effectiveModel,
-            BuildMessageHistory(events),
-            persona.SystemPrompt,
-            modelParameters);
 
         var content = new StringBuilder();
         UsageInfo? usageInfo = null;
 
         try
         {
-            await foreach (var chunk in _chatProvider.StreamAsync(chatRequest, ct).WithCancellation(ct))
+            await foreach (var chunk in _chatProvider.StreamAsync(preparedTurn.ChatRequest, ct).WithCancellation(ct))
             {
                 if (!string.IsNullOrEmpty(chunk.Content))
                 {
@@ -167,7 +140,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
             Guid.NewGuid(),
             conversationId,
             content.ToString(),
-            chatRequest.Model);
+            preparedTurn.ChatRequest.Model);
 
         var turnCompleted = new TurnCompleted(
             conversationId,
@@ -180,26 +153,6 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
             ct);
 
         await _notifier.SendCompletedAsync(conversationId, ct);
-    }
-
-    private static IReadOnlyList<ChatMessage> BuildMessageHistory(IEnumerable<ConversationEvent> events)
-    {
-        var messages = new List<ChatMessage>();
-
-        foreach (var evt in events)
-        {
-            switch (evt)
-            {
-                case MessageSent messageSent:
-                    messages.Add(new ChatMessage(messageSent.Role, messageSent.Content));
-                    break;
-                case AssistantResponseCompleted assistantResponseCompleted:
-                    messages.Add(new ChatMessage(ChatRole.Assistant, assistantResponseCompleted.Content));
-                    break;
-            }
-        }
-
-        return messages;
     }
 
     private static (FailureSource Source, string ErrorCode, string Message) MapFailure(ChatProviderException ex)
