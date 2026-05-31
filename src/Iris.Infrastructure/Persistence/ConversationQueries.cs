@@ -12,31 +12,31 @@ namespace Iris.Infrastructure.Persistence
             _db = db;
         }
 
-        public async Task<List<ConversationSummaryDto>> GetAllAsync(int skip = 0, int take = 50, CancellationToken ct = default)
+        public async Task<IReadOnlyList<ConversationSummaryDto>> GetAllAsync(int skip = 0, int take = 50, CancellationToken ct = default)
         {
             var conversations = await _db.ConversationReadModels
-           .AsNoTracking()
-           .OrderByDescending(c => c.CreatedAt)
-           .Skip(skip)
-           .Take(take)
-           .Select(c => new ConversationSummaryDto(
-               c.Id,
-               c.PersonaId,
-               c.Title,
-               c.CurrentModel,
-               c.CreatedAt,
-               c.MessageCount,
-               c.LastMessageAt))
-           .ToListAsync(ct);
+                .AsNoTracking()
+                .OrderByDescending(c => c.CreatedAt)
+                .Skip(skip)
+                .Take(take)
+                .Select(c => new ConversationSummaryDto(
+                    c.Id,
+                    c.PersonaId,
+                    c.Title,
+                    c.CurrentModel,
+                    c.CreatedAt,
+                    c.MessageCount,
+                    c.LastMessageAt))
+                .ToListAsync(ct);
 
             return conversations;
         }
 
-        public async Task<List<ConversationMessageDto>?> GetMessagesAsync(Guid conversationId, int skip = 0, int take = 100, CancellationToken ct = default)
+        public async Task<IReadOnlyList<ConversationMessageDto>?> GetMessagesAsync(Guid conversationId, int skip = 0, int take = 100, CancellationToken ct = default)
         {
             var exists = await _db.ConversationReadModels
-            .AsNoTracking()
-            .AnyAsync(c => c.Id == conversationId, ct);
+                .AsNoTracking()
+                .AnyAsync(c => c.Id == conversationId, ct);
 
             if (!exists)
                 return null;

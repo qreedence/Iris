@@ -8,5 +8,5 @@ public interface IChatStreamOrchestrator
         Guid conversationId,
         string model,
         ModelParameters? modelParameters,
-        CancellationToken ct);
+        CancellationToken ct = default);
 }

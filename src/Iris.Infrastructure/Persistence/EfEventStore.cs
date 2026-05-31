@@ -16,7 +16,7 @@ public class EfEventStore : IEventStore
         _db = db;
     }
 
-    public async Task AppendAsync(Guid aggregateId, IEnumerable<ConversationEvent> events, Guid commandId, CancellationToken ct)
+    public async Task AppendAsync(Guid aggregateId, IEnumerable<ConversationEvent> events, Guid commandId, CancellationToken ct = default)
     {
         foreach (var evt in events)
         {
@@ -33,7 +33,7 @@ public class EfEventStore : IEventStore
         await _db.SaveChangesAsync(ct);
     }
 
-    public async Task<IReadOnlyList<ConversationEvent>> LoadStreamAsync(Guid aggregateId, CancellationToken ct)
+    public async Task<IReadOnlyList<ConversationEvent>> LoadStreamAsync(Guid aggregateId, CancellationToken ct = default)
     {
         var storedEvents = await _db.StoredEvents
             .AsNoTracking()

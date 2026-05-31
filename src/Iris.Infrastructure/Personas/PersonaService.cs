@@ -43,7 +43,7 @@ public class PersonaService : IPersonaService
         return await FindPersonaAsync(id, userId: null, ct);
     }
 
-    public async Task<List<PersonaDto>> GetAllByUserIdAsync(Guid userId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<PersonaDto>> GetAllByUserIdAsync(Guid userId, CancellationToken ct = default)
     {
         return await _db.Personas
             .AsNoTracking()

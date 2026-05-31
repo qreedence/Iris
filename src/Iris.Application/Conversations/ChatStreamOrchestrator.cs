@@ -41,7 +41,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
         Guid conversationId,
         string model,
         ModelParameters? modelParameters,
-        CancellationToken ct)
+        CancellationToken ct = default)
     {
         var events = await _eventStore.LoadStreamAsync(conversationId, ct);
         if (events.Count == 0)
