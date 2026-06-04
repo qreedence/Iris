@@ -1,6 +1,7 @@
 ﻿using Iris.Application.AiIntegration;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Queries;
+using Iris.Application.Identity.Interfaces;
 using Iris.Application.Personas;
 using Iris.Infrastructure.AiIntegration;
 using Iris.Infrastructure.Identity;
@@ -53,6 +54,7 @@ namespace Iris.Infrastructure
             services.AddScoped<IConversationQueries, ConversationQueries>();
             services.AddScoped<IEventStore, EfEventStore>();
             services.AddScoped<IPersonaService, PersonaService>();
+            services.AddScoped<IAuthService, AuthService>();
 
             return services;
         }

@@ -4,6 +4,7 @@ using Iris.Application;
 using Iris.Application.Conversations;
 using Iris.Application.Exceptions;
 using Iris.Infrastructure;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics;
 using System.Text.Json.Serialization;
 
@@ -21,6 +22,19 @@ builder.Services.AddCors(options =>
             .AllowCredentials();
     });
 });
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer()
+    .AddCookie("ExternalLogin")
+    .AddGoogle(options =>
+    {
+        options.ClientId = builder.Configuration["Google:ClientId"]
+            ?? throw new InvalidOperationException("Google:ClientId is not configured");
+        options.ClientSecret = builder.Configuration["Google:ClientSecret"]
+            ?? throw new InvalidOperationException("Google:ClientSecret is not configured");
+        options.SignInScheme = "ExternalLogin";
+    });
 
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
@@ -70,6 +84,8 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapControllers();
 app.MapHub<ChatHub>("/hubs/chat");
 app.MapHealthChecks("/health");
