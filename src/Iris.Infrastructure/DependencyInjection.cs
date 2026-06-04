@@ -3,8 +3,10 @@ using Iris.Application.Conversations;
 using Iris.Application.Conversations.Queries;
 using Iris.Application.Personas;
 using Iris.Infrastructure.AiIntegration;
+using Iris.Infrastructure.Identity;
 using Iris.Infrastructure.Persistence;
 using Iris.Infrastructure.Personas;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,6 +22,11 @@ namespace Iris.Infrastructure
         {
             services.AddDbContext<AppDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("DefaultConnection")));
+
+            //Identity
+            services.AddIdentityCore<ApplicationUser>()
+                .AddRoles<IdentityRole<Guid>>()
+                .AddEntityFrameworkStores<AppDbContext>();
 
             // OpenRouter
             services.AddOptions<OpenRouterOptions>()
