@@ -1,19 +1,83 @@
-﻿using Iris.Application.Identity.Interfaces;
+﻿using Iris.Application.Exceptions;
+using Iris.Application.Identity.DTOs;
+using Iris.Application.Identity.Interfaces;
 using Iris.Domain.Identity.Enums;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Iris.Infrastructure.Identity
 {
     public class AuthService : IAuthService
     {
-        public Task HandleSocialLoginAsync(LoginProvider provider, ClaimsPrincipal claims, CancellationToken ct = default)
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly JwtOptions _jwtOptions;
+
+        public AuthService(UserManager<ApplicationUser> userManager, IOptions<JwtOptions> jwtOptions)
         {
-            throw new NotImplementedException();
+            _userManager = userManager;
+            _jwtOptions = jwtOptions.Value;
         }
 
-        public Task HandleSocialLoginAsync(LoginProvider provider, List<Claim> claims, CancellationToken ct = default)
+        public async Task<AuthTokenResult> HandleSocialLoginAsync(LoginProvider provider, ClaimsPrincipal claims, CancellationToken ct = default)
         {
-            throw new NotImplementedException();
+            var email = claims.FindFirst(ClaimTypes.Email)?.Value;
+            if (string.IsNullOrEmpty(email))
+                throw new ValidationException("Invalid email");
+
+            var user = await _userManager.FindByEmailAsync(email);
+            if (user == null)
+            {
+                user = new ApplicationUser
+                {
+                    Email = email,
+                    UserName = email
+                };
+
+                await _userManager.CreateAsync(user);
+                var loginInfo = new UserLoginInfo(provider.ToString(), claims.FindFirst(ClaimTypes.NameIdentifier).Value, provider.ToString());
+                await _userManager.AddLoginAsync(user, loginInfo);
+            }
+
+            return new AuthTokenResult 
+            {
+                AccessToken = GenerateAccessToken(user),
+                RefreshToken = GenerateRefreshToken(),
+                AccessTokenExpiresAt = DateTimeOffset.UtcNow.AddMinutes(15),
+                RefreshTokenExpiresAt = DateTimeOffset.UtcNow.AddDays(14)
+            };
         }
+
+        #region Private Helpers
+
+        private string GenerateAccessToken(ApplicationUser user)
+        {
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtOptions.Secret));
+            var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+            var claims = new[]
+            {
+                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+                new Claim(JwtRegisteredClaimNames.Email, user.Email!)
+            };
+
+            var token = new JwtSecurityToken(
+                claims: claims,
+                expires: DateTime.UtcNow.AddMinutes(_jwtOptions.AccessTokenExpirationMinutes),
+                signingCredentials: credentials);
+
+            return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+
+        private string GenerateRefreshToken()
+        {
+            var bytes = RandomNumberGenerator.GetBytes(64);
+            return Convert.ToBase64String(bytes);
+        }
+
+        #endregion
     }
 }

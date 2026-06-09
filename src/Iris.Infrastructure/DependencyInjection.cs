@@ -39,6 +39,10 @@ namespace Iris.Infrastructure
                 .Validate(options => !string.IsNullOrWhiteSpace(options.AppTitle), "OpenRouter AppTitle is required.")
                 .ValidateOnStart();
 
+            services.AddOptions<JwtOptions>()
+                .Bind(configuration.GetSection(JwtOptions.SectionName))
+                .ValidateOnStart();
+
             services.AddHttpClient<IChatProvider, OpenRouterChatProvider>((sp, client) =>
             {
                 var options = sp.GetRequiredService<IOptions<OpenRouterOptions>>().Value;

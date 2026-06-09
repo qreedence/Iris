@@ -18,18 +18,18 @@ namespace Iris.Api.Controllers
         }
 
         [HttpGet("social")]
-        public async Task<IActionResult> SocialLogin(LoginProvider provider)
+        public IActionResult SocialLogin(LoginProvider provider)
         {
+            var properties = new AuthenticationProperties
+            {
+                RedirectUri = Url.Action(nameof(SocialLoginCallback)),
+                Items = { ["LoginProvider"] = provider.ToString() }
+            };
+
             switch (provider)
             {
                 case LoginProvider.Google:
-                    {
-                        var properties = new AuthenticationProperties
-                        {
-                            RedirectUri = Url.Action(nameof(SocialLoginCallback))
-                        };
                         return Challenge(properties, GoogleDefaults.AuthenticationScheme);
-                    }
                 default:
                     return BadRequest();
             }
@@ -42,11 +42,12 @@ namespace Iris.Api.Controllers
             if (!result.Succeeded)
                 return BadRequest("Authentication failed");
 
-            var claims = result.Principal.Claims
-                .Select(c => new { c.Type, c.Value })
-                .ToList();
+            var providerString = result.Properties?.Items["LoginProvider"];
+            if (!Enum.TryParse<LoginProvider>(providerString, out var provider))
+                return BadRequest("Unknown login provider");
 
-            return Ok(claims);
+            var authResult = await _authService.HandleSocialLoginAsync(provider, result.Principal!, ct);
+            return Ok(authResult);
         }
 
         //[HttpPost("refresh")]
