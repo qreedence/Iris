@@ -1,7 +1,9 @@
 ﻿using Iris.Application.Exceptions;
 using Iris.Application.Identity.DTOs;
 using Iris.Application.Identity.Interfaces;
+using Iris.Domain.Identity.Entities;
 using Iris.Domain.Identity.Enums;
+using Iris.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -16,11 +18,13 @@ namespace Iris.Infrastructure.Identity
     {
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly JwtOptions _jwtOptions;
+        private readonly AppDbContext _db;
 
-        public AuthService(UserManager<ApplicationUser> userManager, IOptions<JwtOptions> jwtOptions)
+        public AuthService(UserManager<ApplicationUser> userManager, IOptions<JwtOptions> jwtOptions, AppDbContext db)
         {
             _userManager = userManager;
             _jwtOptions = jwtOptions.Value;
+            _db = db;
         }
 
         public async Task<AuthTokenResult> HandleSocialLoginAsync(LoginProvider provider, ClaimsPrincipal claims, CancellationToken ct = default)
@@ -35,20 +39,37 @@ namespace Iris.Infrastructure.Identity
                 user = new ApplicationUser
                 {
                     Email = email,
-                    UserName = email
+                    UserName = email,
+                    DisplayName = claims.FindFirst(ClaimTypes.Name)?.Value
                 };
 
-                await _userManager.CreateAsync(user);
+                var createResult = await _userManager.CreateAsync(user);
+                if (!createResult.Succeeded)
+                    throw new ValidationException(createResult.Errors.First().Description);
+
                 var loginInfo = new UserLoginInfo(provider.ToString(), claims.FindFirst(ClaimTypes.NameIdentifier).Value, provider.ToString());
                 await _userManager.AddLoginAsync(user, loginInfo);
             }
 
+            var refreshTokenString = GenerateRefreshToken();
+            var refreshToken = new RefreshToken
+            {
+                Token = refreshTokenString,
+                UserId = user.Id,
+                FamilyId = Guid.NewGuid(),
+                ExpiresAt = DateTimeOffset.UtcNow.AddDays(_jwtOptions.RefreshTokenExpirationDays),
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+
+            _db.RefreshTokens.Add(refreshToken);
+            await _db.SaveChangesAsync(ct);
+
             return new AuthTokenResult 
             {
                 AccessToken = GenerateAccessToken(user),
-                RefreshToken = GenerateRefreshToken(),
-                AccessTokenExpiresAt = DateTimeOffset.UtcNow.AddMinutes(15),
-                RefreshTokenExpiresAt = DateTimeOffset.UtcNow.AddDays(14)
+                RefreshToken = refreshTokenString,
+                AccessTokenExpiresAt = DateTimeOffset.UtcNow.AddMinutes(_jwtOptions.AccessTokenExpirationMinutes),
+                RefreshTokenExpiresAt = DateTimeOffset.UtcNow.AddDays(_jwtOptions.RefreshTokenExpirationDays)
             };
         }
 

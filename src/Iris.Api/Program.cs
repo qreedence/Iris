@@ -1,3 +1,4 @@
+using Iris.Api.Authentication;
 using Iris.Api.Conversations;
 using Iris.Api.Hubs;
 using Iris.Application;
@@ -47,7 +48,7 @@ builder.Services.AddSignalR();
 builder.Services.AddScoped<IChatStreamNotifier, SignalRChatStreamNotifier>();
 builder.Services.AddSingleton<IConversationTurnQueue, ConversationTurnQueue>();
 builder.Services.AddHostedService<ConversationTurnWorker>();
-
+builder.Services.AddScoped<AuthCookieService>();
 builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
 
@@ -75,6 +76,7 @@ app.UseExceptionHandler(appBuilder =>
             .ExecuteAsync(context);
     });
 });
+
 app.UseStatusCodePages();
 
 if (app.Environment.IsDevelopment())
@@ -82,8 +84,8 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
+app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();

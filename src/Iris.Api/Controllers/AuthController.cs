@@ -1,4 +1,5 @@
-﻿using Iris.Application.Identity.Interfaces;
+﻿using Iris.Api.Authentication;
+using Iris.Application.Identity.Interfaces;
 using Iris.Domain.Identity.Enums;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Google;
@@ -11,10 +12,12 @@ namespace Iris.Api.Controllers
     public class AuthController : ControllerBase
     {
         private readonly IAuthService _authService;
+        private readonly AuthCookieService _cookieService;
 
-        public AuthController(IAuthService authService)
+        public AuthController(IAuthService authService, AuthCookieService cookieService)
         {
             _authService = authService;
+            _cookieService = cookieService;
         }
 
         [HttpGet("social")]
@@ -29,7 +32,7 @@ namespace Iris.Api.Controllers
             switch (provider)
             {
                 case LoginProvider.Google:
-                        return Challenge(properties, GoogleDefaults.AuthenticationScheme);
+                    return Challenge(properties, GoogleDefaults.AuthenticationScheme);
                 default:
                     return BadRequest();
             }
@@ -46,8 +49,9 @@ namespace Iris.Api.Controllers
             if (!Enum.TryParse<LoginProvider>(providerString, out var provider))
                 return BadRequest("Unknown login provider");
 
-            var authResult = await _authService.HandleSocialLoginAsync(provider, result.Principal!, ct);
-            return Ok(authResult);
+            var authTokens = await _authService.HandleSocialLoginAsync(provider, result.Principal!, ct);
+            _cookieService.SetAuthCookies(Response, authTokens);
+            return Ok();
         }
 
         //[HttpPost("refresh")]

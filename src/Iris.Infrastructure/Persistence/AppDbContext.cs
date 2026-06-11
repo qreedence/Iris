@@ -1,5 +1,6 @@
 ﻿using Iris.Domain.Conversations;
 using Iris.Domain.Conversations.Entities;
+using Iris.Domain.Identity.Entities;
 using Iris.Domain.Personas;
 using Iris.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
@@ -19,6 +20,7 @@ public class AppDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Guid
     public DbSet<ConversationReadModel> ConversationReadModels { get; set; }
     public DbSet<ConversationMessage> ConversationMessages { get; set; }
     public DbSet<Persona> Personas { get; set; }
+    public DbSet<RefreshToken> RefreshTokens { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

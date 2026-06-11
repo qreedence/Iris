@@ -7,6 +7,8 @@
 .env
 
 # Agent instructions (local dev only)
+.claude/
+.agents/
 AGENTS.md
 CLAUDE.md
 
