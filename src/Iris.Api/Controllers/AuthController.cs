@@ -1,9 +1,13 @@
 ﻿using Iris.Api.Authentication;
+using Iris.Application.Identity.DTOs;
 using Iris.Application.Identity.Interfaces;
 using Iris.Domain.Identity.Enums;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 
 namespace Iris.Api.Controllers
 {
@@ -65,11 +69,21 @@ namespace Iris.Api.Controllers
         //{
 
         //}
+        [Authorize]
+        [HttpGet("me")]
+        public IActionResult Me()
+        {
+            var userId = User.FindFirstValue(JwtRegisteredClaimNames.Sub);
+            var email = User.FindFirstValue(JwtRegisteredClaimNames.Email);
 
-        //[HttpGet("me")]
-        //public async Task<IActionResult> Me()
-        //{
+            if (!Guid.TryParse(userId, out var parsedUserId) || string.IsNullOrWhiteSpace(email))
+                return Unauthorized();
 
-        //}
+            return Ok(new MeResponse
+            {
+                UserId = userId,
+                Email = email
+            });
+        }
     }
 }
