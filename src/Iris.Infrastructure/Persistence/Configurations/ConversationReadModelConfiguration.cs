@@ -1,4 +1,4 @@
-﻿using Iris.Domain.Conversations.Entities;
+using Iris.Domain.Conversations.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -11,6 +11,8 @@ namespace Iris.Infrastructure.Persistence.Configurations
             builder.ToTable("conversation_read_models");
 
             builder.HasKey(c => c.Id);
+
+            builder.HasIndex(c => c.UserId);
 
             builder.Property(c => c.Title).IsRequired();
         }

@@ -1,4 +1,4 @@
-﻿using Iris.Application.Conversations.Notifications;
+using Iris.Application.Conversations.Notifications;
 using Iris.Domain.Conversations.Entities;
 using Iris.Domain.Conversations.Events;
 using Iris.Infrastructure.Persistence;
@@ -23,6 +23,7 @@ namespace Iris.Infrastructure.Projectors
             var conversation = new ConversationReadModel
             {
                 Id = notification.Event.ConversationId,
+                UserId = notification.Event.UserId,
                 PersonaId = notification.Event.PersonaId,
                 CreatedAt = notification.OccurredAt,
                 Title = notification.Event.Title,

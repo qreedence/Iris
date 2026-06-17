@@ -89,15 +89,15 @@ namespace Iris.Api.Controllers
         [HttpGet("me")]
         public IActionResult Me()
         {
-            var userId = User.FindFirstValue(JwtRegisteredClaimNames.Sub);
+            var userId = User.GetUserId();
             var email = User.FindFirstValue(JwtRegisteredClaimNames.Email);
 
-            if (!Guid.TryParse(userId, out var parsedUserId) || string.IsNullOrWhiteSpace(email))
+            if (userId != Guid.Empty || string.IsNullOrWhiteSpace(email))
                 return Unauthorized();
 
             return Ok(new MeResponse
             {
-                UserId = parsedUserId,
+                UserId = userId,
                 Email = email
             });
         }

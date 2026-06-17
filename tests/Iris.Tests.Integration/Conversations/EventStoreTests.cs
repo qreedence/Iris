@@ -27,7 +27,7 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
         var sut = CreateSut(db);
         var aggregateId = Guid.NewGuid();
         var commandId = Guid.NewGuid();
-        var evt = new ConversationCreated(aggregateId, Guid.NewGuid(), "Test Chat");
+        var evt = new ConversationCreated(aggregateId, Guid.NewGuid(), Guid.NewGuid(), "Test Chat");
 
         // Act
         var recorded = await sut.AppendAsync(aggregateId, [evt], commandId, TestContext.Current.CancellationToken);
@@ -64,7 +64,7 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
         var commandId = Guid.NewGuid();
         var events = new ConversationEvent[]
         {
-            new ConversationCreated(aggregateId, Guid.NewGuid(), "Chat"),
+            new ConversationCreated(aggregateId, Guid.NewGuid(), Guid.NewGuid(), "Chat"),
             new MessageSent(Guid.NewGuid(), aggregateId, "Hello", ChatRole.User),
             new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, "Hi there!", "test/model"),
         };
@@ -108,7 +108,7 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
         var commandId = Guid.NewGuid();
 
         await sut.AppendAsync(aggregateId, [
-            new ConversationCreated(aggregateId, Guid.NewGuid(), "Chat")
+            new ConversationCreated(aggregateId, Guid.NewGuid(), Guid.NewGuid(), "Chat")
         ], commandId, TestContext.Current.CancellationToken);
 
         await sut.AppendAsync(aggregateId, [
@@ -156,12 +156,12 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
         var aggregateB = Guid.NewGuid();
 
         await sut.AppendAsync(aggregateA, [
-            new ConversationCreated(aggregateA, Guid.NewGuid(), "Chat A"),
+            new ConversationCreated(aggregateA, Guid.NewGuid(), Guid.NewGuid(), "Chat A"),
             new MessageSent(Guid.NewGuid(), aggregateA, "Hello from A", ChatRole.User),
         ], Guid.NewGuid(), TestContext.Current.CancellationToken);
 
         await sut.AppendAsync(aggregateB, [
-            new ConversationCreated(aggregateB, Guid.NewGuid(), "Chat B"),
+            new ConversationCreated(aggregateB, Guid.NewGuid(), Guid.NewGuid(), "Chat B"),
             new MessageSent(Guid.NewGuid(), aggregateB, "Hello from B", ChatRole.User),
         ], Guid.NewGuid(), TestContext.Current.CancellationToken);
 
@@ -189,7 +189,7 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
 
         // Act
         var recorded = await sut.AppendAsync(aggregateId, [
-            new ConversationCreated(aggregateId, Guid.NewGuid(), "Chat"),
+            new ConversationCreated(aggregateId, Guid.NewGuid(), Guid.NewGuid(), "Chat"),
         ], commandId, TestContext.Current.CancellationToken);
 
         var after = DateTimeOffset.UtcNow;
@@ -225,7 +225,7 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
 
         var original = new ConversationEvent[]
         {
-            new ConversationCreated(aggregateId, personaId, "My Chat"),
+            new ConversationCreated(aggregateId, Guid.NewGuid(), personaId, "My Chat"),
             new MessageSent(Guid.NewGuid(), aggregateId, "What is the meaning of life?", ChatRole.User),
             new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, "42, obviously.", "anthropic/claude-sonnet-4"),
             new TurnCompleted(aggregateId, 150, 42),
@@ -290,7 +290,7 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
 
         // Act — two separate appends
         await sut.AppendAsync(aggregateId, [
-            new ConversationCreated(aggregateId, Guid.NewGuid(), "Chat"),
+            new ConversationCreated(aggregateId, Guid.NewGuid(), Guid.NewGuid(), "Chat"),
             new MessageSent(Guid.NewGuid(), aggregateId, "Hello", ChatRole.User),
         ], Guid.NewGuid(), TestContext.Current.CancellationToken);
 

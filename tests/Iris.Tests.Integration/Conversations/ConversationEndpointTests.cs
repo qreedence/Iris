@@ -22,13 +22,14 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         Converters = { new JsonStringEnumConverter() }
     };
 
+    private readonly Guid _userId = Guid.NewGuid();
     private readonly HttpClient _client;
     private readonly ApiTestFactory _factory;
 
     public ConversationEndpointTests(ApiTestFactory factory)
     {
         _factory = factory;
-        _client = factory.CreateClient();
+        _client = factory.CreateAuthenticatedClient(_userId);
     }
 
     private async Task SendCommand<TResponse>(IRequest<TResponse> command)
@@ -43,10 +44,13 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     [Fact]
     public async Task PostConversation_ValidData_Returns201WithId()
     {
+        // Arrange
+        var persona = await CreatePersonaAsync();
+
         // Act
         var response = await _client.PostAsJsonAsync(
             "/api/conversations",
-            new CreateConversationRequest(Guid.NewGuid(), "New Chat"),
+            new CreateConversationRequest(persona.Id, "New Chat"),
             TestContext.Current.CancellationToken);
 
         // Assert
@@ -62,10 +66,13 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     [Fact]
     public async Task PostConversation_EmptyTitle_Returns400()
     {
+        // Arrange
+        var persona = await CreatePersonaAsync();
+
         // Act
         var response = await _client.PostAsJsonAsync(
             "/api/conversations",
-            new CreateConversationRequest(Guid.NewGuid(), ""),
+            new CreateConversationRequest(persona.Id, ""),
             TestContext.Current.CancellationToken);
 
         // Assert
@@ -75,15 +82,16 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     [Fact]
     public async Task PostConversation_SequentialCreates_BothSucceed()
     {
-        // Arrange — create a conversation via MediatR first
+        // Arrange
+        var persona = await CreatePersonaAsync();
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Existing"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Existing"));
 
         // Act — create another via HTTP (server generates a new ID, so no actual duplicate)
         // Instead, test the handler's duplicate guard by sending the same command twice
         var response1 = await _client.PostAsJsonAsync(
             "/api/conversations",
-            new CreateConversationRequest(Guid.NewGuid(), "Chat A"),
+            new CreateConversationRequest(persona.Id, "Chat A"),
             TestContext.Current.CancellationToken);
 
         response1.StatusCode.Should().Be(HttpStatusCode.Created);
@@ -94,7 +102,7 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         // This test verifies two sequential creates both succeed.
         var response2 = await _client.PostAsJsonAsync(
             "/api/conversations",
-            new CreateConversationRequest(Guid.NewGuid(), "Chat B"),
+            new CreateConversationRequest(persona.Id, "Chat B"),
             TestContext.Current.CancellationToken);
 
         response2.StatusCode.Should().Be(HttpStatusCode.Created);
@@ -105,7 +113,7 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         using var scope = _factory.Services.CreateScope();
         var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
         return await personaService.CreateAsync(
-            Guid.NewGuid(),
+            _userId,
             new CreatePersonaRequest(name),
             TestContext.Current.CancellationToken);
     }
@@ -118,7 +126,7 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         // Arrange
         var persona = await CreatePersonaAsync();
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
 
         // Act
         var response = await _client.GetAsync("/api/conversations", TestContext.Current.CancellationToken);
@@ -136,7 +144,7 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         // Arrange
         var persona = await CreatePersonaAsync();
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
 
         // Act
         var response = await _client.GetAsync("/api/conversations", TestContext.Current.CancellationToken);
@@ -173,8 +181,8 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         // Arrange
         var id1 = Guid.NewGuid();
         var id2 = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(id1, Guid.NewGuid(), "Chat One"));
-        await SendCommand(new CreateConversationCommand(id2, Guid.NewGuid(), "Chat Two"));
+        await SendCommand(new CreateConversationCommand(id1, _userId, Guid.NewGuid(), "Chat One"));
+        await SendCommand(new CreateConversationCommand(id2, _userId, Guid.NewGuid(), "Chat Two"));
 
         // Act
         var response = await _client.GetAsync("/api/conversations", TestContext.Current.CancellationToken);
@@ -197,7 +205,7 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Shape Test"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, Guid.NewGuid(), "Shape Test"));
         await SendCommand(new SendMessageCommand(conversationId, "Hello", ChatRole.User));
 
         // Act
@@ -221,7 +229,7 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, Guid.NewGuid(), "Chat"));
         await SendCommand(new SendMessageCommand(conversationId, "First", ChatRole.User));
         await SendCommand(new SendMessageCommand(conversationId, "Second", ChatRole.User));
         await SendCommand(new SendMessageCommand(conversationId, "Third", ChatRole.User));
@@ -260,7 +268,7 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, Guid.NewGuid(), "Chat"));
         await SendCommand(new SendMessageCommand(conversationId, "Hello!", ChatRole.User));
 
         // Act
@@ -287,8 +295,8 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         var conversationA = Guid.NewGuid();
         var conversationB = Guid.NewGuid();
 
-        await SendCommand(new CreateConversationCommand(conversationA, Guid.NewGuid(), "Chat A"));
-        await SendCommand(new CreateConversationCommand(conversationB, Guid.NewGuid(), "Chat B"));
+        await SendCommand(new CreateConversationCommand(conversationA, _userId, Guid.NewGuid(), "Chat A"));
+        await SendCommand(new CreateConversationCommand(conversationB, _userId, Guid.NewGuid(), "Chat B"));
 
         await SendCommand(new SendMessageCommand(conversationA, "Message A", ChatRole.User));
         await SendCommand(new SendMessageCommand(conversationB, "Message B", ChatRole.User));

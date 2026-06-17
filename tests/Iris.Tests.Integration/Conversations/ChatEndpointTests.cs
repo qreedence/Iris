@@ -16,13 +16,14 @@ namespace Iris.Tests.Integration.Conversations;
 
 public class ChatEndpointTests : IClassFixture<ApiTestFactory>
 {
+    private readonly Guid _userId = Guid.NewGuid();
     private readonly HttpClient _client;
     private readonly ApiTestFactory _factory;
 
     public ChatEndpointTests(ApiTestFactory factory)
     {
         _factory = factory;
-        _client = factory.CreateClient();
+        _client = factory.CreateAuthenticatedClient(_userId);
     }
 
     private async Task SendCommand<TResponse>(IRequest<TResponse> command)
@@ -40,7 +41,7 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         using var scope = _factory.Services.CreateScope();
         var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
         return await personaService.CreateAsync(
-            Guid.NewGuid(),
+            _userId,
             new CreatePersonaRequest(name, systemPrompt, modelPreference),
             TestContext.Current.CancellationToken);
     }
@@ -57,7 +58,7 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         // Arrange
         var persona = await CreatePersonaAsync();
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
 
         // Act
         var response = await _client.PostAsJsonAsync(
@@ -88,7 +89,7 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         // Arrange
         var persona = await CreatePersonaAsync();
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
 
         // Act
         var response = await _client.PostAsJsonAsync(
@@ -98,7 +99,7 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
 
         using var scope = _factory.Services.CreateScope();
         var queries = scope.ServiceProvider.GetRequiredService<IConversationQueries>();
-        var messages = await queries.GetMessagesAsync(conversationId, 0, 10, TestContext.Current.CancellationToken);
+        var messages = await queries.GetMessagesAsync(_userId, conversationId, 0, 10, TestContext.Current.CancellationToken);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
@@ -119,7 +120,7 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
 
         var persona = await CreatePersonaAsync();
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
 
         // Turn 1
         await _client.PostAsJsonAsync(
@@ -156,7 +157,7 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         var userMessage = $"prompt-test-{Guid.NewGuid()}";
         var persona = await CreatePersonaAsync(systemPrompt: "Answer as Iris.");
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
 
         // Act
         var response = await _client.PostAsJsonAsync(
@@ -184,7 +185,7 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         var userMessage = $"model-preference-test-{Guid.NewGuid()}";
         var persona = await CreatePersonaAsync(modelPreference: "persona/model");
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
 
         // Act — request model matches persona preference
         var response = await _client.PostAsJsonAsync(
@@ -212,7 +213,7 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         var userMessage = $"model-preference-fallback-test-{Guid.NewGuid()}";
         var persona = await CreatePersonaAsync(modelPreference: "persona/model");
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
 
         // Act
         var response = await _client.PostAsJsonAsync(
@@ -240,7 +241,7 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         var userMessage = $"model-change-test-{Guid.NewGuid()}";
         var persona = await CreatePersonaAsync(modelPreference: "persona/model");
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
 
         // Act
         var response = await _client.PostAsJsonAsync(
@@ -268,7 +269,7 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         var userMessage = $"fallback-model-test-{Guid.NewGuid()}";
         var persona = await CreatePersonaAsync();
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, persona.Id, "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
 
         // Act
         var response = await _client.PostAsJsonAsync(

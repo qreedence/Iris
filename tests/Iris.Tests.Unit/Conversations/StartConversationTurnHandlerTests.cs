@@ -52,7 +52,7 @@ public class StartConversationTurnHandlerTests
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns(new List<ConversationEvent>
             {
-                new ConversationCreated(conversationId, Guid.NewGuid(), "Existing Conversation")
+                new ConversationCreated(conversationId, Guid.NewGuid(), Guid.NewGuid(), "Existing Conversation")
             });
     }
 
