@@ -136,6 +136,15 @@ namespace Iris.Infrastructure.Identity
             return result;
         }
 
+        public async Task LogoutAsync(string refreshToken, CancellationToken ct = default)
+        {
+            var token = await _db.RefreshTokens.FirstOrDefaultAsync(t => t.Token == refreshToken, ct);
+            if (token == null)
+                return;
+
+            await RevokeFamilyAsync(token.FamilyId, ct);
+        }
+
 
         #region Private Helpers
 

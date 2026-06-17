@@ -8,8 +8,6 @@ namespace Iris.Application.Identity.Interfaces
     {
         Task<AuthTokenResult> HandleSocialLoginAsync(LoginProvider provider, ClaimsPrincipal claims, CancellationToken ct = default);
         Task<AuthTokenResult> RefreshAsync(string refreshToken, CancellationToken ct = default);
-
-        //Task LogOutAsync(LogOutRequest request, CancellationToken ct = default);
-        //Task<UserDto> GetCurrentUserAsync(Guid userId, CancellationToken ct = default);
+        Task LogoutAsync(string refreshToken, CancellationToken ct = default);
     }
 }

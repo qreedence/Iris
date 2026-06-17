@@ -72,11 +72,19 @@ namespace Iris.Api.Controllers
             return Ok();
         }
 
-        //[HttpPost("logout")]
-        //public async Task<IActionResult> LogOut()
-        //{
+        [HttpPost("logout")]
+        public async Task<IActionResult> Logout(CancellationToken ct)
+        {
+            var refreshToken = Request.Cookies["refresh_token"];
 
-        //}
+            if (!string.IsNullOrWhiteSpace(refreshToken))
+                await _authService.LogoutAsync(refreshToken, ct);
+
+            _cookieService.ClearAuthCookies(Response);
+
+            return NoContent();
+        }
+
         [Authorize]
         [HttpGet("me")]
         public IActionResult Me()
