@@ -99,6 +99,7 @@ app.UseExceptionHandler(appBuilder =>
         {
             ValidationException => (StatusCodes.Status400BadRequest, "Validation Error"),
             NotFoundException => (StatusCodes.Status404NotFound, "Not Found"),
+            UnauthorizedException => (StatusCodes.Status401Unauthorized, "Unauthorized" ),
             _ => (StatusCodes.Status500InternalServerError, "Internal Server Error")
         };
 

@@ -7,6 +7,7 @@ using Iris.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.EntityFrameworkCore;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -68,7 +69,7 @@ namespace Iris.Infrastructure.Identity
             _db.RefreshTokens.Add(refreshToken);
             await _db.SaveChangesAsync(ct);
 
-            return new AuthTokenResult 
+            return new AuthTokenResult
             {
                 AccessToken = GenerateAccessToken(user),
                 RefreshToken = refreshTokenString,
@@ -76,6 +77,65 @@ namespace Iris.Infrastructure.Identity
                 RefreshTokenExpiresAt = DateTimeOffset.UtcNow.AddDays(_jwtOptions.RefreshTokenExpirationDays)
             };
         }
+
+        public async Task<AuthTokenResult> RefreshAsync(string refreshToken, CancellationToken ct = default)
+        {
+            var existing = await _db.RefreshTokens
+                .AsNoTracking()
+                .FirstOrDefaultAsync(t => t.Token == refreshToken, ct);
+
+            if (existing == null || existing.IsRevoked || existing.ExpiresAt < DateTimeOffset.UtcNow)
+                throw new UnauthorizedException("Invalid refresh token");
+
+            await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+
+            if (existing.IsUsed)
+            {
+                await RevokeFamilyAsync(existing.FamilyId, ct);
+                await transaction.CommitAsync(ct);
+                throw new UnauthorizedException("Invalid refresh token");
+            }
+
+            var user = await _userManager.FindByIdAsync(existing.UserId.ToString());
+            if (user == null)
+                throw new UnauthorizedException("Invalid refresh token");
+
+            var markedUsed = await _db.RefreshTokens
+                .Where(t => t.Id == existing.Id && !t.IsUsed && !t.IsRevoked)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(t => t.IsUsed, true), ct);
+
+            if (markedUsed == 0)
+            {
+                await RevokeFamilyAsync(existing.FamilyId, ct);
+                await transaction.CommitAsync(ct);
+                throw new UnauthorizedException("Invalid refresh token");
+            }
+
+            var result = new AuthTokenResult
+            {
+                AccessToken = GenerateAccessToken(user),
+                RefreshToken = GenerateRefreshToken(),
+                AccessTokenExpiresAt = DateTimeOffset.UtcNow.AddMinutes(_jwtOptions.AccessTokenExpirationMinutes),
+                RefreshTokenExpiresAt = DateTimeOffset.UtcNow.AddDays(_jwtOptions.RefreshTokenExpirationDays)
+            };
+
+            var newRefreshToken = new RefreshToken
+            {
+                FamilyId = existing.FamilyId,
+                Token = result.RefreshToken,
+                UserId = user.Id,
+                ExpiresAt = result.RefreshTokenExpiresAt,
+                CreatedAt = DateTimeOffset.UtcNow,
+            };
+
+            _db.RefreshTokens.Add(newRefreshToken);
+            await _db.SaveChangesAsync(ct);
+
+            await transaction.CommitAsync(ct);
+            return result;
+        }
+
 
         #region Private Helpers
 
@@ -103,6 +163,14 @@ namespace Iris.Infrastructure.Identity
         {
             var bytes = RandomNumberGenerator.GetBytes(64);
             return Convert.ToBase64String(bytes);
+        }
+
+        private async Task RevokeFamilyAsync(Guid familyId, CancellationToken ct)
+        {
+            await _db.RefreshTokens
+            .Where(t => t.FamilyId == familyId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(t => t.IsRevoked, true), ct);
         }
 
         #endregion
