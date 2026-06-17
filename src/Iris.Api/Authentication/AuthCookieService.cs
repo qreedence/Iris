@@ -21,9 +21,10 @@ namespace Iris.Api.Authentication
         {
             return new CookieOptions
             {
+                Path = "/",
                 HttpOnly = true,
+                SameSite = SameSiteMode.Lax,
                 Secure = !_environment.IsDevelopment(),
-                SameSite = _environment.IsDevelopment() ? SameSiteMode.Lax : SameSiteMode.None,
                 Expires = expiresAt
             };
         }

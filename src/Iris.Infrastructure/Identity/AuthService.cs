@@ -168,9 +168,9 @@ namespace Iris.Infrastructure.Identity
         private async Task RevokeFamilyAsync(Guid familyId, CancellationToken ct)
         {
             await _db.RefreshTokens
-            .Where(t => t.FamilyId == familyId)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(t => t.IsRevoked, true), ct);
+                .Where(t => t.FamilyId == familyId)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(t => t.IsRevoked, true), ct);
         }
 
         #endregion
