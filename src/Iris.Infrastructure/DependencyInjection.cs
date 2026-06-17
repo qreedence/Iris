@@ -41,6 +41,11 @@ namespace Iris.Infrastructure
 
             services.AddOptions<JwtOptions>()
                 .Bind(configuration.GetSection(JwtOptions.SectionName))
+                .Validate(options => !string.IsNullOrWhiteSpace(options.Secret), "Jwt Secret is required.")
+                .Validate(options => !string.IsNullOrWhiteSpace(options.Issuer), "Jwt Issuer is required.")
+                .Validate(options => !string.IsNullOrWhiteSpace(options.Audience), "Jwt Audience is required.")
+                .Validate(options => options.AccessTokenExpirationMinutes > 0, "Jwt access token expiration must be greater than zero.")
+                .Validate(options => options.RefreshTokenExpirationDays > 0, "Jwt refresh token expiration must be greater than zero.")
                 .ValidateOnStart();
 
             services.AddHttpClient<IChatProvider, OpenRouterChatProvider>((sp, client) =>
