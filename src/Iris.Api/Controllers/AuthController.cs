@@ -81,7 +81,7 @@ namespace Iris.Api.Controllers
 
             return Ok(new MeResponse
             {
-                UserId = userId,
+                UserId = parsedUserId,
                 Email = email
             });
         }

@@ -47,7 +47,11 @@ namespace Iris.Infrastructure.Identity
                 if (!createResult.Succeeded)
                     throw new ValidationException(createResult.Errors.First().Description);
 
-                var loginInfo = new UserLoginInfo(provider.ToString(), claims.FindFirst(ClaimTypes.NameIdentifier).Value, provider.ToString());
+                var providerUserId = claims.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrWhiteSpace(providerUserId))
+                    throw new ValidationException("Invalid provider user id");
+
+                var loginInfo = new UserLoginInfo(provider.ToString(), providerUserId, provider.ToString());
                 await _userManager.AddLoginAsync(user, loginInfo);
             }
 
