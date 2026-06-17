@@ -40,7 +40,8 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         using var scope = _factory.Services.CreateScope();
         var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
         return await personaService.CreateAsync(
-            new CreatePersonaRequest(Guid.NewGuid(), name, systemPrompt, modelPreference),
+            Guid.NewGuid(),
+            new CreatePersonaRequest(name, systemPrompt, modelPreference),
             TestContext.Current.CancellationToken);
     }
 

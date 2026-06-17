@@ -3,10 +3,12 @@ using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Commands.StartConversationTurn;
 using Iris.Application.Conversations.Queries;
 using MediatR;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Iris.Api.Controllers;
 
+[Authorize]
 [ApiController]
 [Route("api/[controller]")]
 public class ConversationsController : ControllerBase

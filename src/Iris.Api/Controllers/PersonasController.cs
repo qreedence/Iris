@@ -1,8 +1,11 @@
+using Iris.Api.Authentication;
 using Iris.Application.Personas;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Iris.Api.Controllers;
 
+[Authorize]
 [ApiController]
 [Route("api/[controller]")]
 public class PersonasController : ControllerBase
@@ -21,16 +24,17 @@ public class PersonasController : ControllerBase
         [FromBody] CreatePersonaRequest request,
         CancellationToken ct = default)
     {
-        var persona = await _personaService.CreateAsync(request, ct);
-        return CreatedAtAction(nameof(GetById), new { id = persona.Id, userId = request.UserId }, persona);
+        var userId = User.GetUserId();
+        var persona = await _personaService.CreateAsync(userId, request, ct);
+        return CreatedAtAction(nameof(GetById), new { id = persona.Id }, persona);
     }
 
     [HttpGet]
     [ProducesResponseType<List<PersonaDto>>(200)]
     public async Task<IActionResult> GetAll(
-        [FromQuery] Guid userId,
         CancellationToken ct = default)
     {
+        var userId = User.GetUserId();
         var personas = await _personaService.GetAllByUserIdAsync(userId, ct);
         return Ok(personas);
     }
@@ -40,9 +44,9 @@ public class PersonasController : ControllerBase
     [ProducesResponseType<ProblemDetails>(404)]
     public async Task<IActionResult> GetById(
         Guid id,
-        [FromQuery] Guid userId,
         CancellationToken ct = default)
     {
+        var userId = User.GetUserId();
         var persona = await _personaService.GetByIdAsync(userId, id, ct);
         return Ok(persona);
     }
@@ -53,10 +57,10 @@ public class PersonasController : ControllerBase
     [ProducesResponseType<ProblemDetails>(404)]
     public async Task<IActionResult> Update(
         Guid id,
-        [FromQuery] Guid userId,
         [FromBody] UpdatePersonaRequest request,
         CancellationToken ct = default)
     {
+        var userId = User.GetUserId();
         var persona = await _personaService.UpdateAsync(userId, id, request, ct);
         return Ok(persona);
     }
@@ -66,9 +70,9 @@ public class PersonasController : ControllerBase
     [ProducesResponseType<ProblemDetails>(404)]
     public async Task<IActionResult> Delete(
         Guid id,
-        [FromQuery] Guid userId,
         CancellationToken ct = default)
     {
+        var userId = User.GetUserId();
         await _personaService.DeleteAsync(userId, id, ct);
         return NoContent();
     }

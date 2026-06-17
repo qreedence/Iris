@@ -2,24 +2,27 @@ using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
 using Iris.Application.Personas;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Iris.Tests.Integration.Personas;
 
 public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
 {
+    private readonly ApiTestFactory _factory;
+    private readonly Guid _userId = Guid.NewGuid();
     private readonly HttpClient _client;
 
     public PersonaEndpointTests(ApiTestFactory factory)
     {
-        _client = factory.CreateClient();
+        _factory = factory;
+        _client = factory.CreateAuthenticatedClient(_userId);
     }
 
     [Fact]
     public async Task PostPersona_ValidData_Returns201WithDto()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-        var request = new CreatePersonaRequest(userId, "Iris", "Be concise.");
+        var request = new CreatePersonaRequest("Iris", "Be concise.");
 
         // Act
         var response = await _client.PostAsJsonAsync(
@@ -48,7 +51,7 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
         // Act
         var response = await _client.PostAsJsonAsync(
             "/api/personas",
-            new CreatePersonaRequest(Guid.NewGuid(), ""),
+            new CreatePersonaRequest(""),
             TestContext.Current.CancellationToken);
 
         // Assert
@@ -56,18 +59,16 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
     }
 
     [Fact]
-    public async Task GetPersonas_ReturnsPersonasForUser()
+    public async Task GetPersonas_ReturnsPersonasForAuthenticatedUser()
     {
         // Arrange
-        var userA = Guid.NewGuid();
-        var userB = Guid.NewGuid();
-        var personaA1 = await CreatePersonaAsync(userA, "A One");
-        var personaA2 = await CreatePersonaAsync(userA, "A Two");
-        await CreatePersonaAsync(userB, "B One");
+        var personaA1 = await CreatePersonaAsync("A One");
+        var personaA2 = await CreatePersonaAsync("A Two");
+        await CreatePersonaForUserAsync(Guid.NewGuid(), "B One");
 
         // Act
         var response = await _client.GetAsync(
-            $"/api/personas?userId={userA}",
+            "/api/personas",
             TestContext.Current.CancellationToken);
 
         // Assert
@@ -85,12 +86,11 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
     public async Task GetPersona_Exists_Returns200()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-        var created = await CreatePersonaAsync(userId, "Iris", "Be useful.");
+        var created = await CreatePersonaAsync("Iris", "Be useful.");
 
         // Act
         var response = await _client.GetAsync(
-            $"/api/personas/{created.Id}?userId={userId}",
+            $"/api/personas/{created.Id}",
             TestContext.Current.CancellationToken);
 
         // Assert
@@ -110,7 +110,22 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
     {
         // Act
         var response = await _client.GetAsync(
-            $"/api/personas/{Guid.NewGuid()}?userId={Guid.NewGuid()}",
+            $"/api/personas/{Guid.NewGuid()}",
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task GetPersona_OtherUsersPersona_Returns404()
+    {
+        // Arrange
+        var otherPersona = await CreatePersonaForUserAsync(Guid.NewGuid(), "Other User Persona");
+
+        // Act
+        var response = await _client.GetAsync(
+            $"/api/personas/{otherPersona.Id}",
             TestContext.Current.CancellationToken);
 
         // Assert
@@ -121,12 +136,11 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
     public async Task PutPersona_ValidData_Returns200WithUpdatedFields()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-        var created = await CreatePersonaAsync(userId, "Before");
+        var created = await CreatePersonaAsync("Before");
 
         // Act
         var response = await _client.PutAsJsonAsync(
-            $"/api/personas/{created.Id}?userId={userId}",
+            $"/api/personas/{created.Id}",
             new UpdatePersonaRequest("After", SystemPrompt: "Updated prompt.", ModelPreference: "test/model", Avatar: "https://example.com/avatar.png"),
             TestContext.Current.CancellationToken);
 
@@ -146,18 +160,33 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
     }
 
     [Fact]
+    public async Task PutPersona_OtherUsersPersona_Returns404()
+    {
+        // Arrange
+        var otherPersona = await CreatePersonaForUserAsync(Guid.NewGuid(), "Other User Persona");
+
+        // Act
+        var response = await _client.PutAsJsonAsync(
+            $"/api/personas/{otherPersona.Id}",
+            new UpdatePersonaRequest("Nope"),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
     public async Task DeletePersona_Exists_Returns204()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-        var created = await CreatePersonaAsync(userId, "Delete Me");
+        var created = await CreatePersonaAsync("Delete Me");
 
         // Act
         var deleteResponse = await _client.DeleteAsync(
-            $"/api/personas/{created.Id}?userId={userId}",
+            $"/api/personas/{created.Id}",
             TestContext.Current.CancellationToken);
         var getResponse = await _client.GetAsync(
-            $"/api/personas/{created.Id}?userId={userId}",
+            $"/api/personas/{created.Id}",
             TestContext.Current.CancellationToken);
 
         // Assert
@@ -170,7 +199,22 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
     {
         // Act
         var response = await _client.DeleteAsync(
-            $"/api/personas/{Guid.NewGuid()}?userId={Guid.NewGuid()}",
+            $"/api/personas/{Guid.NewGuid()}",
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task DeletePersona_OtherUsersPersona_Returns404()
+    {
+        // Arrange
+        var otherPersona = await CreatePersonaForUserAsync(Guid.NewGuid(), "Other User Persona");
+
+        // Act
+        var response = await _client.DeleteAsync(
+            $"/api/personas/{otherPersona.Id}",
             TestContext.Current.CancellationToken);
 
         // Assert
@@ -181,8 +225,7 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
     public async Task PostPersona_WithRoleAndGroup_Returns201WithFields()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-        var request = new CreatePersonaRequest(userId, "Iris", Role: "Backend Architect", Group: "Dev Team");
+        var request = new CreatePersonaRequest("Iris", Role: "Backend Architect", Group: "Dev Team");
 
         // Act
         var response = await _client.PostAsJsonAsync(
@@ -203,13 +246,10 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
     [Fact]
     public async Task PostPersona_WithoutRoleAndGroup_FieldsAreNull()
     {
-        // Arrange
-        var userId = Guid.NewGuid();
-
         // Act
         var response = await _client.PostAsJsonAsync(
             "/api/personas",
-            new CreatePersonaRequest(userId, "Iris"),
+            new CreatePersonaRequest("Iris"),
             TestContext.Current.CancellationToken);
 
         // Assert
@@ -224,12 +264,11 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
     public async Task PutPersona_UpdatesRoleAndGroup()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-        var created = await CreatePersonaAsync(userId, "Iris");
+        var created = await CreatePersonaAsync("Iris");
 
         // Act
         var response = await _client.PutAsJsonAsync(
-            $"/api/personas/{created.Id}?userId={userId}",
+            $"/api/personas/{created.Id}",
             new UpdatePersonaRequest("Iris", Role: "QA Engineer", Group: "Testing"),
             TestContext.Current.CancellationToken);
 
@@ -244,14 +283,13 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
     }
 
     private async Task<PersonaDto> CreatePersonaAsync(
-        Guid userId,
         string name,
         string? systemPrompt = null,
         string? modelPreference = null)
     {
         var response = await _client.PostAsJsonAsync(
             "/api/personas",
-            new CreatePersonaRequest(userId, name, systemPrompt, modelPreference),
+            new CreatePersonaRequest(name, systemPrompt, modelPreference),
             TestContext.Current.CancellationToken);
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
@@ -260,5 +298,18 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
             cancellationToken: TestContext.Current.CancellationToken);
 
         return persona!;
+    }
+
+    private async Task<PersonaDto> CreatePersonaForUserAsync(
+        Guid userId,
+        string name)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
+
+        return await personaService.CreateAsync(
+            userId,
+            new CreatePersonaRequest(name),
+            TestContext.Current.CancellationToken);
     }
 }

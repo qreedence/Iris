@@ -2,8 +2,10 @@ using System.Runtime.CompilerServices;
 using Iris.Application.AiIntegration;
 using Iris.Application.AiIntegration.Models;
 using Iris.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
@@ -13,6 +15,10 @@ namespace Iris.Tests.Integration;
 
 public class ApiTestFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
+    private const string TestJwtSecret = "test-jwt-secret-with-enough-length-for-hmac-sha256";
+    private const string TestJwtIssuer = "Iris.Api";
+    private const string TestJwtAudience = "Iris.Client";
+
     private readonly PostgreSqlContainer _dbContainer = new PostgreSqlBuilder("postgres:latest")
         .WithDatabase("iris_test")
         .WithUsername("test")
@@ -46,8 +52,30 @@ public class ApiTestFactory : WebApplicationFactory<Program>, IAsyncLifetime
         yield return new StreamedChunk(null, true, new UsageInfo(10, 5, 15));
     }
 
+    public HttpClient CreateAuthenticatedClient(Guid userId, string email = "test@iris.local")
+    {
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Add(TestAuthHandler.UserIdHeader, userId.ToString());
+        client.DefaultRequestHeaders.Add(TestAuthHandler.EmailHeader, email);
+        return client;
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        builder.ConfigureAppConfiguration((_, configuration) =>
+        {
+            configuration.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Jwt:Secret"] = TestJwtSecret,
+                ["Jwt:Issuer"] = TestJwtIssuer,
+                ["Jwt:Audience"] = TestJwtAudience,
+                ["Jwt:AccessTokenExpirationMinutes"] = "15",
+                ["Jwt:RefreshTokenExpirationDays"] = "14",
+                ["Google:ClientId"] = "test-google-client-id",
+                ["Google:ClientSecret"] = "test-google-client-secret"
+            });
+        });
+
         builder.ConfigureServices(services =>
         {
             // Remove the real DbContext registration
@@ -68,6 +96,11 @@ public class ApiTestFactory : WebApplicationFactory<Program>, IAsyncLifetime
                 services.Remove(chatProviderDescriptor);
 
             services.AddSingleton(MockChatProvider);
+
+            services.AddAuthentication(TestAuthHandler.SchemeName)
+                .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(
+                    TestAuthHandler.SchemeName,
+                    _ => { });
         });
     }
 

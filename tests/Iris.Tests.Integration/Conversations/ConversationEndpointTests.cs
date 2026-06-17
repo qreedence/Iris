@@ -105,7 +105,8 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         using var scope = _factory.Services.CreateScope();
         var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
         return await personaService.CreateAsync(
-            new CreatePersonaRequest(Guid.NewGuid(), name),
+            Guid.NewGuid(),
+            new CreatePersonaRequest(name),
             TestContext.Current.CancellationToken);
     }
 
