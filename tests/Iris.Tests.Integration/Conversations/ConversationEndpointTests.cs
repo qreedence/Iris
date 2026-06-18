@@ -80,6 +80,22 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     }
 
     [Fact]
+    public async Task PostConversation_OtherUsersPersona_Returns404()
+    {
+        // Arrange
+        var otherPersona = await CreatePersonaForUserAsync(Guid.NewGuid(), "Other User Persona");
+
+        // Act
+        var response = await _client.PostAsJsonAsync(
+            "/api/conversations",
+            new CreateConversationRequest(otherPersona.Id, "Nope"),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
     public async Task PostConversation_SequentialCreates_BothSucceed()
     {
         // Arrange
@@ -114,6 +130,16 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
         return await personaService.CreateAsync(
             _userId,
+            new CreatePersonaRequest(name),
+            TestContext.Current.CancellationToken);
+    }
+
+    private async Task<PersonaDto> CreatePersonaForUserAsync(Guid userId, string name)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
+        return await personaService.CreateAsync(
+            userId,
             new CreatePersonaRequest(name),
             TestContext.Current.CancellationToken);
     }
@@ -159,6 +185,21 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     // ── §1 GET /api/conversations — empty ─────────────────────────
 
     [Fact]
+    public async Task GetConversations_WithoutAuth_Returns401()
+    {
+        // Arrange
+        using var unauthenticatedClient = _factory.CreateClient();
+
+        // Act
+        var response = await unauthenticatedClient.GetAsync(
+            "/api/conversations",
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
     public async Task GetConversations_NoConversations_ReturnsEmptyList()
     {
         // Act
@@ -174,6 +215,30 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     }
 
     // ── §2 GET /api/conversations — after creating ────────────────
+
+    [Fact]
+    public async Task GetConversations_OnlyReturnsAuthenticatedUsersConversations()
+    {
+        // Arrange
+        var ownConversationId = Guid.NewGuid();
+        var otherConversationId = Guid.NewGuid();
+
+        await SendCommand(new CreateConversationCommand(ownConversationId, _userId, Guid.NewGuid(), "Mine"));
+        await SendCommand(new CreateConversationCommand(otherConversationId, Guid.NewGuid(), Guid.NewGuid(), "Not Mine"));
+
+        // Act
+        var response = await _client.GetAsync("/api/conversations", TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var conversations = await response.Content
+            .ReadFromJsonAsync<List<ConversationSummaryDto>>(JsonOptions, TestContext.Current.CancellationToken);
+
+        conversations.Should().NotBeNull();
+        conversations!.Should().Contain(c => c.Id == ownConversationId);
+        conversations.Should().NotContain(c => c.Id == otherConversationId);
+    }
 
     [Fact]
     public async Task GetConversations_AfterCreating_ReturnsConversationList()
@@ -262,6 +327,23 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     }
 
     // ── §6 GET /api/conversations/{id}/messages — response shape ──
+
+    [Fact]
+    public async Task GetMessages_OtherUsersConversation_Returns404()
+    {
+        // Arrange
+        var conversationId = Guid.NewGuid();
+        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), Guid.NewGuid(), "Not Mine"));
+        await SendCommand(new SendMessageCommand(conversationId, "Secret", ChatRole.User));
+
+        // Act
+        var response = await _client.GetAsync(
+            $"/api/conversations/{conversationId}/messages",
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
 
     [Fact]
     public async Task GetMessages_ResponseShape_MatchesExpectedDto()

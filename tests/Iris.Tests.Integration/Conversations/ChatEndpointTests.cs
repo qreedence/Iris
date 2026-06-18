@@ -84,6 +84,23 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
     }
 
     [Fact]
+    public async Task PostChat_OtherUsersConversation_Returns404()
+    {
+        // Arrange
+        var conversationId = Guid.NewGuid();
+        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), Guid.NewGuid(), "Not Mine"));
+
+        // Act
+        var response = await _client.PostAsJsonAsync(
+            $"/api/conversations/{conversationId}/chat",
+            CreateChatRequest(),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
     public async Task PostChat_ValidConversation_PersistsUserMessage()
     {
         // Arrange

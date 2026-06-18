@@ -92,7 +92,7 @@ namespace Iris.Api.Controllers
             var userId = User.GetUserId();
             var email = User.FindFirstValue(JwtRegisteredClaimNames.Email);
 
-            if (userId != Guid.Empty || string.IsNullOrWhiteSpace(email))
+            if (userId == Guid.Empty || string.IsNullOrWhiteSpace(email))
                 return Unauthorized();
 
             return Ok(new MeResponse

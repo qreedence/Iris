@@ -59,6 +59,21 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
     }
 
     [Fact]
+    public async Task GetPersonas_WithoutAuth_Returns401()
+    {
+        // Arrange
+        using var unauthenticatedClient = _factory.CreateClient();
+
+        // Act
+        var response = await unauthenticatedClient.GetAsync(
+            "/api/personas",
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
     public async Task GetPersonas_ReturnsPersonasForAuthenticatedUser()
     {
         // Arrange
