@@ -54,6 +54,16 @@ builder.Services
         {
             OnMessageReceived = context =>
             {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+
+                if (!string.IsNullOrEmpty(accessToken) 
+                    && path.StartsWithSegments("/hubs/chat"))
+                {
+                    context.Token = accessToken;
+                    return Task.CompletedTask;
+                }
+
                 if (context.Request.Cookies.TryGetValue("access_token", out var token))
                 {
                     context.Token = token;
@@ -125,7 +135,7 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
-app.MapHub<ChatHub>("/hubs/chat");
+app.MapHub<ChatHub>("/hubs/chat").RequireAuthorization();
 app.MapHealthChecks("/health");
 app.Run();
 

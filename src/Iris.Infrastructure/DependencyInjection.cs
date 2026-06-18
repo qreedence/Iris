@@ -63,6 +63,7 @@ namespace Iris.Infrastructure
             services.AddScoped<IConversationQueries, ConversationQueries>();
             services.AddScoped<IEventStore, EfEventStore>();
             services.AddScoped<IPersonaService, PersonaService>();
+            services.AddScoped<ITokenService, JwtTokenService>();
             services.AddScoped<IAuthService, AuthService>();
 
             return services;

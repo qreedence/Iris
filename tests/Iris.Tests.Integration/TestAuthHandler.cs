@@ -23,8 +23,19 @@ public class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        if (!Request.Headers.TryGetValue(UserIdHeader, out var userIdValue)
-            || !Guid.TryParse(userIdValue, out var userId))
+        Guid userId;
+        if (Request.Headers.TryGetValue(UserIdHeader, out var userIdValue)
+            && Guid.TryParse(userIdValue, out var headerUserId))
+        {
+            userId = headerUserId;
+        }
+        else if (Request.Path.StartsWithSegments("/hubs/chat")
+                 && Request.Query.TryGetValue("access_token", out var queryUserIdValue)
+                 && Guid.TryParse(queryUserIdValue, out var queryUserId))
+        {
+            userId = queryUserId;
+        }
+        else
         {
             return Task.FromResult(AuthenticateResult.NoResult());
         }

@@ -82,7 +82,7 @@ namespace Iris.Api.Controllers
 
             _cookieService.ClearAuthCookies(Response);
 
-            return NoContent();
+            return Ok();
         }
 
         [Authorize]

@@ -6,12 +6,8 @@ using Iris.Domain.Identity.Enums;
 using Iris.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
 using Microsoft.EntityFrameworkCore;
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace Iris.Infrastructure.Identity
 {
@@ -20,12 +16,18 @@ namespace Iris.Infrastructure.Identity
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly JwtOptions _jwtOptions;
         private readonly AppDbContext _db;
+        private readonly ITokenService _tokenService;
 
-        public AuthService(UserManager<ApplicationUser> userManager, IOptions<JwtOptions> jwtOptions, AppDbContext db)
+        public AuthService(
+            UserManager<ApplicationUser> userManager,
+            IOptions<JwtOptions> jwtOptions,
+            AppDbContext db,
+            ITokenService tokenService)
         {
             _userManager = userManager;
             _jwtOptions = jwtOptions.Value;
             _db = db;
+            _tokenService = tokenService;
         }
 
         public async Task<AuthTokenResult> HandleSocialLoginAsync(LoginProvider provider, ClaimsPrincipal claims, CancellationToken ct = default)
@@ -33,6 +35,10 @@ namespace Iris.Infrastructure.Identity
             var email = claims.FindFirst(ClaimTypes.Email)?.Value;
             if (string.IsNullOrEmpty(email))
                 throw new ValidationException("Invalid email");
+
+            var providerUserId = claims.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrWhiteSpace(providerUserId))
+                throw new ValidationException("Invalid provider user id");
 
             var user = await _userManager.FindByEmailAsync(email);
             if (user == null)
@@ -47,16 +53,19 @@ namespace Iris.Infrastructure.Identity
                 var createResult = await _userManager.CreateAsync(user);
                 if (!createResult.Succeeded)
                     throw new ValidationException(createResult.Errors.First().Description);
-
-                var providerUserId = claims.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                if (string.IsNullOrWhiteSpace(providerUserId))
-                    throw new ValidationException("Invalid provider user id");
-
-                var loginInfo = new UserLoginInfo(provider.ToString(), providerUserId, provider.ToString());
-                await _userManager.AddLoginAsync(user, loginInfo);
             }
 
-            var refreshTokenString = GenerateRefreshToken();
+            var providerName = provider.ToString();
+            var logins = await _userManager.GetLoginsAsync(user);
+            if (!logins.Any(login => login.LoginProvider == providerName))
+            {
+                var loginInfo = new UserLoginInfo(providerName, providerUserId, providerName);
+                var addLoginResult = await _userManager.AddLoginAsync(user, loginInfo);
+                if (!addLoginResult.Succeeded)
+                    throw new ValidationException(addLoginResult.Errors.First().Description);
+            }
+
+            var refreshTokenString = await _tokenService.GenerateRefreshToken();
             var refreshToken = new RefreshToken
             {
                 Token = refreshTokenString,
@@ -71,7 +80,7 @@ namespace Iris.Infrastructure.Identity
 
             return new AuthTokenResult
             {
-                AccessToken = GenerateAccessToken(user),
+                AccessToken = await _tokenService.GenerateAccessTokenAsync(user.Id, user.Email!, ct),
                 RefreshToken = refreshTokenString,
                 AccessTokenExpiresAt = DateTimeOffset.UtcNow.AddMinutes(_jwtOptions.AccessTokenExpirationMinutes),
                 RefreshTokenExpiresAt = DateTimeOffset.UtcNow.AddDays(_jwtOptions.RefreshTokenExpirationDays)
@@ -114,8 +123,8 @@ namespace Iris.Infrastructure.Identity
 
             var result = new AuthTokenResult
             {
-                AccessToken = GenerateAccessToken(user),
-                RefreshToken = GenerateRefreshToken(),
+                AccessToken = await _tokenService.GenerateAccessTokenAsync(user.Id, user.Email!, ct),
+                RefreshToken = await _tokenService.GenerateRefreshToken(),
                 AccessTokenExpiresAt = DateTimeOffset.UtcNow.AddMinutes(_jwtOptions.AccessTokenExpirationMinutes),
                 RefreshTokenExpiresAt = DateTimeOffset.UtcNow.AddDays(_jwtOptions.RefreshTokenExpirationDays)
             };
@@ -147,32 +156,6 @@ namespace Iris.Infrastructure.Identity
 
 
         #region Private Helpers
-
-        private string GenerateAccessToken(ApplicationUser user)
-        {
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtOptions.Secret));
-            var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-            var claims = new[]
-            {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-                new Claim(JwtRegisteredClaimNames.Email, user.Email!)
-            };
-
-            var token = new JwtSecurityToken(
-                issuer: _jwtOptions.Issuer,
-                audience: _jwtOptions.Audience,
-                claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(_jwtOptions.AccessTokenExpirationMinutes),
-                signingCredentials: credentials);
-
-            return new JwtSecurityTokenHandler().WriteToken(token);
-        }
-
-        private string GenerateRefreshToken()
-        {
-            var bytes = RandomNumberGenerator.GetBytes(64);
-            return Convert.ToBase64String(bytes);
-        }
 
         private async Task RevokeFamilyAsync(Guid familyId, CancellationToken ct)
         {
