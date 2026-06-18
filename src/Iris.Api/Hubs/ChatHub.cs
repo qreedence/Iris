@@ -1,7 +1,9 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Iris.Api.Hubs;
 
+[Authorize]
 public class ChatHub : Hub<IChatClient>
 {
     public Task JoinConversation(Guid conversationId)

@@ -22,6 +22,9 @@ namespace Iris.Application.Conversations.Commands.CreateConversation
             
             if (command.ConversationId == Guid.Empty)
                 throw new ValidationException("ConversationId can not be empty.");
+
+            if (command.UserId == Guid.Empty)
+                throw new ValidationException("UserId can not be empty.");
             
             if (command.PersonaId == Guid.Empty)
                 throw new ValidationException("PersonaId can not be empty.");
@@ -30,7 +33,12 @@ namespace Iris.Application.Conversations.Commands.CreateConversation
             if (existingEvents.Count > 0)
                 throw new ValidationException("Conversation already exists.");
 
-            var conversation = new ConversationCreated(command.ConversationId, command.PersonaId, command.Title);
+            var conversation = new ConversationCreated(
+                command.ConversationId,
+                command.UserId,
+                command.PersonaId,
+                command.Title);
+
             await _eventRecorder.RecordAsync(command.ConversationId, [conversation], ct);
             return conversation.ConversationId;
         }

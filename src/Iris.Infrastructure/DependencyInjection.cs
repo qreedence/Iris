@@ -1,10 +1,13 @@
 ﻿using Iris.Application.AiIntegration;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Queries;
+using Iris.Application.Identity.Interfaces;
 using Iris.Application.Personas;
 using Iris.Infrastructure.AiIntegration;
+using Iris.Infrastructure.Identity;
 using Iris.Infrastructure.Persistence;
 using Iris.Infrastructure.Personas;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,6 +24,11 @@ namespace Iris.Infrastructure
             services.AddDbContext<AppDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("DefaultConnection")));
 
+            //Identity
+            services.AddIdentityCore<ApplicationUser>()
+                .AddRoles<IdentityRole<Guid>>()
+                .AddEntityFrameworkStores<AppDbContext>();
+
             // OpenRouter
             services.AddOptions<OpenRouterOptions>()
                 .Bind(configuration.GetSection(OpenRouterOptions.SectionName))
@@ -29,6 +37,15 @@ namespace Iris.Infrastructure
                 .Validate(options => !string.IsNullOrWhiteSpace(options.AppUrl), "OpenRouter AppUrl is required.")
                 .Validate(options => Uri.IsWellFormedUriString(options.AppUrl, UriKind.Absolute), "OpenRouter AppUrl must be an absolute URI.")
                 .Validate(options => !string.IsNullOrWhiteSpace(options.AppTitle), "OpenRouter AppTitle is required.")
+                .ValidateOnStart();
+
+            services.AddOptions<JwtOptions>()
+                .Bind(configuration.GetSection(JwtOptions.SectionName))
+                .Validate(options => !string.IsNullOrWhiteSpace(options.Secret), "Jwt Secret is required.")
+                .Validate(options => !string.IsNullOrWhiteSpace(options.Issuer), "Jwt Issuer is required.")
+                .Validate(options => !string.IsNullOrWhiteSpace(options.Audience), "Jwt Audience is required.")
+                .Validate(options => options.AccessTokenExpirationMinutes > 0, "Jwt access token expiration must be greater than zero.")
+                .Validate(options => options.RefreshTokenExpirationDays > 0, "Jwt refresh token expiration must be greater than zero.")
                 .ValidateOnStart();
 
             services.AddHttpClient<IChatProvider, OpenRouterChatProvider>((sp, client) =>
@@ -46,6 +63,8 @@ namespace Iris.Infrastructure
             services.AddScoped<IConversationQueries, ConversationQueries>();
             services.AddScoped<IEventStore, EfEventStore>();
             services.AddScoped<IPersonaService, PersonaService>();
+            services.AddScoped<ITokenService, JwtTokenService>();
+            services.AddScoped<IAuthService, AuthService>();
 
             return services;
         }

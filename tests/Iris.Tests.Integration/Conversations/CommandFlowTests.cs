@@ -51,7 +51,7 @@ public class CommandFlowTests : IClassFixture<IntegrationTestFactory>
         // Arrange
         var conversationId = Guid.NewGuid();
         var personaId = Guid.NewGuid();
-        var command = new CreateConversationCommand(conversationId, personaId, "My First Chat");
+        var command = new CreateConversationCommand(conversationId, Guid.NewGuid(), personaId, "My First Chat");
 
         // Act
         var result = await SendCommand(command);
@@ -75,7 +75,7 @@ public class CommandFlowTests : IClassFixture<IntegrationTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), Guid.NewGuid(), "Chat"));
 
         var sendCommand = new SendMessageCommand(conversationId, "Hello, Iris!", ChatRole.User);
 
@@ -101,7 +101,7 @@ public class CommandFlowTests : IClassFixture<IntegrationTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), Guid.NewGuid(), "Chat"));
 
         // Act
         await SendCommand(new SendMessageCommand(conversationId, "First message", ChatRole.User));
@@ -129,8 +129,8 @@ public class CommandFlowTests : IClassFixture<IntegrationTestFactory>
         var conversationA = Guid.NewGuid();
         var conversationB = Guid.NewGuid();
 
-        await SendCommand(new CreateConversationCommand(conversationA, Guid.NewGuid(), "Chat A"));
-        await SendCommand(new CreateConversationCommand(conversationB, Guid.NewGuid(), "Chat B"));
+        await SendCommand(new CreateConversationCommand(conversationA, Guid.NewGuid(), Guid.NewGuid(), "Chat A"));
+        await SendCommand(new CreateConversationCommand(conversationB, Guid.NewGuid(), Guid.NewGuid(), "Chat B"));
 
         // Act
         await SendCommand(new SendMessageCommand(conversationA, "Message for A", ChatRole.User));
@@ -154,10 +154,10 @@ public class CommandFlowTests : IClassFixture<IntegrationTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "First"));
+        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), Guid.NewGuid(), "First"));
 
         // Act — same ID again
-        var act = () => SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), "Duplicate"));
+        var act = () => SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), Guid.NewGuid(), "Duplicate"));
 
         // Assert
         await act.Should().ThrowAsync<ValidationException>()

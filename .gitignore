@@ -7,6 +7,8 @@
 .env
 
 # Agent instructions (local dev only)
+.claude/
+.agents/
 AGENTS.md
 CLAUDE.md
 
@@ -487,3 +489,7 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Local agent/tool state
+skills-lock.json
+plans/

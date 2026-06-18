@@ -21,7 +21,7 @@ public class ConversationEventRecorderTests
         var occurredAt = DateTimeOffset.UtcNow;
         var events = new ConversationEvent[]
         {
-            new ConversationCreated(aggregateId, Guid.NewGuid(), "Chat"),
+            new ConversationCreated(aggregateId, Guid.NewGuid(), Guid.NewGuid(), "Chat"),
             new MessageSent(Guid.NewGuid(), aggregateId, "Hello", ChatRole.User),
             new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, "Hi", "test/model"),
             new TurnCompleted(aggregateId, 10, 5),

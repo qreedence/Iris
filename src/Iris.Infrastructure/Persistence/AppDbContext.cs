@@ -1,11 +1,15 @@
 ﻿using Iris.Domain.Conversations;
 using Iris.Domain.Conversations.Entities;
+using Iris.Domain.Identity.Entities;
 using Iris.Domain.Personas;
+using Iris.Infrastructure.Identity;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace Iris.Infrastructure.Persistence;
 
-public class AppDbContext : DbContext
+public class AppDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>
 {
     public AppDbContext(DbContextOptions<AppDbContext> options)
         : base(options)
@@ -16,9 +20,11 @@ public class AppDbContext : DbContext
     public DbSet<ConversationReadModel> ConversationReadModels { get; set; }
     public DbSet<ConversationMessage> ConversationMessages { get; set; }
     public DbSet<Persona> Personas { get; set; }
+    public DbSet<RefreshToken> RefreshTokens { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
     }
 }

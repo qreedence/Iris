@@ -53,7 +53,7 @@ public class PersonaService : IPersonaService
             .ToListAsync(ct);
     }
 
-    public async Task<PersonaDto> CreateAsync(CreatePersonaRequest request, CancellationToken ct = default)
+    public async Task<PersonaDto> CreateAsync(Guid userId, CreatePersonaRequest request, CancellationToken ct = default)
     {
         ValidateName(request.Name);
 
@@ -61,7 +61,7 @@ public class PersonaService : IPersonaService
         var persona = new Persona
         {
             Id = Guid.NewGuid(),
-            UserId = request.UserId,
+            UserId = userId,
             Name = request.Name,
             SystemPrompt = request.SystemPrompt,
             ModelPreference = request.ModelPreference,

@@ -1,8 +1,9 @@
-﻿namespace Iris.Domain.Conversations.Entities
+namespace Iris.Domain.Conversations.Entities
 {
     public class ConversationReadModel
     {
         public Guid Id { get; set; }
+        public Guid UserId { get; set; }
         public Guid PersonaId { get; set; }
         public string Title { get; set; } = string.Empty;
         public string? CurrentModel { get; set; }

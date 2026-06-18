@@ -27,10 +27,12 @@ public class CreateConversationHandlerTests
 
     private static CreateConversationCommand CreateValidCommand(
         Guid? conversationId = null,
+        Guid? userId = null,
         Guid? personaId = null,
         string title = "Test Conversation") =>
         new(
             conversationId ?? Guid.NewGuid(),
+            userId ?? Guid.NewGuid(),
             personaId ?? Guid.NewGuid(),
             title);
 
@@ -135,7 +137,7 @@ public class CreateConversationHandlerTests
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns(new List<ConversationEvent>
             {
-                new ConversationCreated(conversationId, Guid.NewGuid(), "Already Exists")
+                new ConversationCreated(conversationId, Guid.NewGuid(), Guid.NewGuid(), "Already Exists")
             });
 
         // Act

@@ -1,25 +1,32 @@
+using Iris.Api.Authentication;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Commands.StartConversationTurn;
 using Iris.Application.Conversations.Queries;
+using Iris.Application.Personas;
 using MediatR;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Iris.Api.Controllers;
 
+[Authorize]
 [ApiController]
 [Route("api/[controller]")]
 public class ConversationsController : ControllerBase
 {
     private readonly IConversationQueries _conversationQueries;
     private readonly IMediator _mediator;
+    private readonly IPersonaService _personaService;
 
     public ConversationsController(
         IConversationQueries conversationQueries,
-        IMediator mediator)
+        IMediator mediator,
+        IPersonaService personaService)
     {
         _conversationQueries = conversationQueries;
         _mediator = mediator;
+        _personaService = personaService;
     }
 
     [HttpPost]
@@ -29,8 +36,11 @@ public class ConversationsController : ControllerBase
         [FromBody] CreateConversationRequest request,
         CancellationToken ct = default)
     {
+        var userId = User.GetUserId();
+        await _personaService.GetByIdAsync(userId, request.PersonaId, ct);
+
         var conversationId = Guid.NewGuid();
-        var command = new CreateConversationCommand(conversationId, request.PersonaId, request.Title);
+        var command = new CreateConversationCommand(conversationId, userId, request.PersonaId, request.Title);
         await _mediator.Send(command, ct);
         return CreatedAtAction(nameof(GetMessages), new { id = conversationId }, conversationId);
     }
@@ -42,7 +52,8 @@ public class ConversationsController : ControllerBase
         [FromQuery] int take = 50,
         CancellationToken ct = default)
     {
-        var conversations = await _conversationQueries.GetAllAsync(skip, take, ct);
+        var userId = User.GetUserId();
+        var conversations = await _conversationQueries.GetAllAsync(userId, skip, take, ct);
         return Ok(conversations);
     }
 
@@ -55,7 +66,8 @@ public class ConversationsController : ControllerBase
         [FromQuery] int take = 100,
         CancellationToken ct = default)
     {
-        var messages = await _conversationQueries.GetMessagesAsync(id, skip, take, ct);
+        var userId = User.GetUserId();
+        var messages = await _conversationQueries.GetMessagesAsync(userId, id, skip, take, ct);
         if (messages == null) return NotFound();
         return Ok(messages);
     }
@@ -68,6 +80,10 @@ public class ConversationsController : ControllerBase
         [FromBody] ChatRequestDto request,
         CancellationToken ct = default)
     {
+        var userId = User.GetUserId();
+        var exists = await _conversationQueries.ExistsForUserAsync(userId, id, ct);
+        if (!exists) return NotFound();
+
         var command = new StartConversationTurnCommand(
             id,
             request.UserMessage,

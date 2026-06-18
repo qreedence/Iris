@@ -27,7 +27,7 @@ public class ConversationTurnPreparerTests
 
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns([
-                new ConversationCreated(conversationId, personaId, "Chat"),
+                new ConversationCreated(conversationId, Guid.NewGuid(), personaId, "Chat"),
                 new MessageSent(Guid.NewGuid(), conversationId, "First user message", ChatRole.User),
                 new AssistantResponseCompleted(Guid.NewGuid(), conversationId, "First assistant response", "test/model"),
                 new MessageSent(Guid.NewGuid(), conversationId, "Second user message", ChatRole.User)
@@ -156,7 +156,7 @@ public class ConversationTurnPreparerTests
         var personaId = Guid.NewGuid();
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns([
-                new ConversationCreated(conversationId, personaId, "Chat"),
+                new ConversationCreated(conversationId, Guid.NewGuid(), personaId, "Chat"),
                 new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User),
                 new ModelChanged(conversationId, "changed/model")
             ]);
@@ -184,7 +184,7 @@ public class ConversationTurnPreparerTests
         var personaId = Guid.NewGuid();
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns([
-                new ConversationCreated(conversationId, personaId, "Chat"),
+                new ConversationCreated(conversationId, Guid.NewGuid(), personaId, "Chat"),
                 new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User),
                 new ModelChanged(conversationId, "old/model")
             ]);
@@ -278,7 +278,7 @@ public class ConversationTurnPreparerTests
     {
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns([
-                new ConversationCreated(conversationId, personaId, "Chat"),
+                new ConversationCreated(conversationId, Guid.NewGuid(), personaId, "Chat"),
                 new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User)
             ]);
     }
