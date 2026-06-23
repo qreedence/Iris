@@ -397,4 +397,27 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         messages![0].Content.Should().Be("Message A");
         messages[0].ConversationId.Should().Be(conversationA);
     }
+
+    // ── Unauthenticated coverage ──────────────────────────────────
+
+    [Fact]
+    public async Task PostConversation_WithoutAuth_Returns401()
+    {
+        using var client = _factory.CreateClient();
+        var response = await client.PostAsJsonAsync(
+            "/api/conversations",
+            new CreateConversationRequest(Guid.NewGuid(), "Nope"),
+            TestContext.Current.CancellationToken);
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task GetMessages_WithoutAuth_Returns401()
+    {
+        using var client = _factory.CreateClient();
+        var response = await client.GetAsync(
+            $"/api/conversations/{Guid.NewGuid()}/messages",
+            TestContext.Current.CancellationToken);
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
 }

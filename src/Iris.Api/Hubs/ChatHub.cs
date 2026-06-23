@@ -15,13 +15,13 @@ public class ChatHub : Hub<IChatClient>
         _conversationQueries = conversationQueries;
     }
 
-    public async Task JoinConversation(Guid conversationId, CancellationToken ct = default)
+    public async Task JoinConversation(Guid conversationId)
     {
         var userId = Context.User!.GetUserId();
-        if (!await _conversationQueries.ExistsForUserAsync(userId, conversationId, ct))
+        if (!await _conversationQueries.ExistsForUserAsync(userId, conversationId, Context.ConnectionAborted))
             throw new HubException("Conversation does not exist for this user");
-            
-        await Groups.AddToGroupAsync(Context.ConnectionId, GetConversationGroupName(conversationId));
+
+        await Groups.AddToGroupAsync(Context.ConnectionId, GetConversationGroupName(conversationId), Context.ConnectionAborted);
     }
 
     public Task LeaveConversation(Guid conversationId)

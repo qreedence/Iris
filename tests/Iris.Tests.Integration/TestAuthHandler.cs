@@ -29,11 +29,16 @@ public class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions
         {
             userId = headerUserId;
         }
-        else if (Request.Path.StartsWithSegments("/hubs/chat")
-                 && Request.Query.TryGetValue("access_token", out var queryUserIdValue)
+        else if (Request.Query.TryGetValue("access_token", out var queryUserIdValue)
                  && Guid.TryParse(queryUserIdValue, out var queryUserId))
         {
             userId = queryUserId;
+        }
+        else if (Request.Headers.TryGetValue("Authorization", out var authHeader)
+                 && authHeader.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+                 && Guid.TryParse(authHeader.ToString()["Bearer ".Length..], out var bearerUserId))
+        {
+            userId = bearerUserId;
         }
         else
         {
