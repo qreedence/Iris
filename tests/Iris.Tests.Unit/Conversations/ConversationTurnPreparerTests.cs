@@ -294,6 +294,34 @@ public class ConversationTurnPreparerTests
             ]);
     }
 
+    [Fact]
+    public async Task PrepareAsync_ConversationBelongsToAnotherUser_ThrowsNotFoundException()
+    {
+        // Arrange
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
+        var attackerId = Guid.NewGuid();
+
+        _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
+            .Returns([
+                new ConversationCreated(conversationId, _userId, personaId, "Chat"),
+                new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User)
+            ]);
+
+        // Act — attacker tries to prepare another user's conversation
+        var act = () => sut.PrepareAsync(
+            attackerId,
+            conversationId,
+            "fallback/model",
+            changeModel: false,
+            modelParameters: null,
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        await act.Should().ThrowAsync<NotFoundException>();
+    }
+
     private void SetupPersona(Guid personaId, string? systemPrompt = null, string? modelPreference = null)
     {
         _personaService.GetForConversationAsync(personaId, Arg.Any<CancellationToken>())
