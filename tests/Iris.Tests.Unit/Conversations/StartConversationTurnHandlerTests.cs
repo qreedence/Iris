@@ -35,17 +35,21 @@ public class StartConversationTurnHandlerTests
     }
 
     private static StartConversationTurnCommand CreateValidCommand(
-        Guid? conversationId = null,
-        string userMessage = "Hello!",
-        string model = "test/model",
-        bool changeModel = false,
-        ModelParameters? modelParameters = null) =>
-        new(
-            conversationId ?? Guid.NewGuid(),
-            userMessage,
-            model,
-            changeModel,
-            modelParameters);
+         Guid? userId = null,
+         Guid? conversationId = null,
+         string userMessage = "Hello!",
+         string model = "test/model",
+         bool changeModel = false,
+         ModelParameters? modelParameters = null) =>
+         new()
+         {
+             UserId = userId ?? Guid.NewGuid(),
+             ConversationId = conversationId ?? Guid.NewGuid(),
+             UserMessage = userMessage,
+             Model = model,
+             ChangeModel = changeModel,
+             ModelParameters = modelParameters
+         };
 
     private void SetupExistingConversation(Guid conversationId)
     {

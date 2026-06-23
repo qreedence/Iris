@@ -16,7 +16,6 @@ namespace Iris.Infrastructure.Persistence
         {
             var conversations = await _db.ConversationReadModels
                 .AsNoTracking()
-                .Where(c => c.UserId == userId)
                 .OrderByDescending(c => c.CreatedAt)
                 .Skip(skip)
                 .Take(take)
@@ -61,7 +60,7 @@ namespace Iris.Infrastructure.Persistence
         {
             return await _db.ConversationReadModels
                 .AsNoTracking()
-                .AnyAsync(c => c.Id == conversationId && c.UserId == userId, ct);
+                .AnyAsync(c => c.Id == conversationId, ct);
         }
     }
 }

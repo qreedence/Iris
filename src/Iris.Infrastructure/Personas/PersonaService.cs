@@ -35,19 +35,18 @@ public class PersonaService : IPersonaService
 
     public async Task<PersonaDto> GetByIdAsync(Guid userId, Guid id, CancellationToken ct = default)
     {
-        return await FindPersonaAsync(id, userId, ct);
+        return await FindPersonaAsync(id, ct);
     }
 
     public async Task<PersonaDto> GetForConversationAsync(Guid id, CancellationToken ct = default)
     {
-        return await FindPersonaAsync(id, userId: null, ct);
+        return await FindPersonaAsync(id, ct);
     }
 
     public async Task<IReadOnlyList<PersonaDto>> GetAllByUserIdAsync(Guid userId, CancellationToken ct = default)
     {
         return await _db.Personas
             .AsNoTracking()
-            .Where(p => p.UserId == userId)
             .OrderByDescending(p => p.CreatedAt)
             .Select(ProjectToDto)
             .ToListAsync(ct);
@@ -132,14 +131,11 @@ public class PersonaService : IPersonaService
             persona.UserId);
     }
 
-    private async Task<PersonaDto> FindPersonaAsync(Guid id, Guid? userId, CancellationToken ct)
+    private async Task<PersonaDto> FindPersonaAsync(Guid id, CancellationToken ct)
     {
         var query = _db.Personas
             .AsNoTracking()
             .Where(p => p.Id == id);
-
-        if (userId.HasValue)
-            query = query.Where(p => p.UserId == userId.Value);
 
         return await query.Select(ProjectToDto).FirstOrDefaultAsync(ct)
             ?? throw new NotFoundException("Persona not found.");

@@ -11,10 +11,12 @@ namespace Iris.Tests.Integration.Conversations;
 public class ProjectorTests : IClassFixture<IntegrationTestFactory>
 {
     private readonly IntegrationTestFactory _factory;
+    private readonly Guid _userId = Guid.NewGuid();
 
     public ProjectorTests(IntegrationTestFactory factory)
     {
         _factory = factory;
+        _factory.CurrentUser.UserId = _userId;
     }
 
     private async Task<TResponse> SendCommand<TResponse>(IRequest<TResponse> command)
@@ -35,7 +37,7 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
         var personaId = Guid.NewGuid();
 
         // Act
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), personaId, "Projected Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, personaId, "Projected Chat"));
 
         // Assert
         await using var db = _factory.CreateDbContext();
@@ -56,7 +58,7 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), Guid.NewGuid(), "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, Guid.NewGuid(), "Chat"));
 
         // Act
         await SendCommand(new SendMessageCommand(conversationId, "Hello, Iris!", ChatRole.User));
@@ -80,7 +82,7 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), Guid.NewGuid(), "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, Guid.NewGuid(), "Chat"));
 
         // Act
         await SendCommand(new SendMessageCommand(conversationId, "First message", ChatRole.User));
@@ -103,7 +105,7 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), Guid.NewGuid(), "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, Guid.NewGuid(), "Chat"));
 
         // Act
         await SendCommand(new SendMessageCommand(conversationId, "First", ChatRole.User));
@@ -129,8 +131,8 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
         var conversationA = Guid.NewGuid();
         var conversationB = Guid.NewGuid();
 
-        await SendCommand(new CreateConversationCommand(conversationA, Guid.NewGuid(), Guid.NewGuid(), "Chat A"));
-        await SendCommand(new CreateConversationCommand(conversationB, Guid.NewGuid(), Guid.NewGuid(), "Chat B"));
+        await SendCommand(new CreateConversationCommand(conversationA, _userId, Guid.NewGuid(), "Chat A"));
+        await SendCommand(new CreateConversationCommand(conversationB, _userId, Guid.NewGuid(), "Chat B"));
 
         // Act
         await SendCommand(new SendMessageCommand(conversationA, "Message A1", ChatRole.User));
@@ -160,7 +162,7 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), Guid.NewGuid(), "Chat"));
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, Guid.NewGuid(), "Chat"));
 
         // Act
         await SendCommand(new SendMessageCommand(conversationId, "First", ChatRole.User));

@@ -45,11 +45,14 @@ public class StartConversationTurnHandler : IRequestHandler<StartConversationTur
         await _eventRecorder.RecordAsync(command.ConversationId, [message], ct);
 
         await _turnQueue.EnqueueAsync(
-            new ConversationTurnWorkItem(
-                command.ConversationId,
-                command.Model,
-                command.ChangeModel,
-                command.ModelParameters),
+            new ConversationTurnWorkItem
+            {
+                UserId = command.UserId,
+                ConversationId = command.ConversationId,
+                Model = command.Model,
+                ChangeModel = command.ChangeModel,
+                ModelParameters = command.ModelParameters,
+            },
             ct);
 
         return Unit.Value;

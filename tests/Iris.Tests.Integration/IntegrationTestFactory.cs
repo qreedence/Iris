@@ -2,6 +2,7 @@ using Iris.Application;
 using Iris.Application.AiIntegration;
 using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations;
+using Iris.Application.Identity.Interfaces;
 using Iris.Infrastructure;
 using Iris.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -24,6 +25,7 @@ public class IntegrationTestFactory : IAsyncLifetime
     /// Default: returns "Mock AI response" with 10/5 tokens.
     /// </summary>
     public IChatProvider MockChatProvider { get; } = CreateDefaultMockChatProvider();
+    public TestCurrentUserService CurrentUser { get; } = new();
 
     private static IChatProvider CreateDefaultMockChatProvider()
     {
@@ -43,7 +45,7 @@ public class IntegrationTestFactory : IAsyncLifetime
             .UseNpgsql(_dbContainer.GetConnectionString())
             .Options;
 
-        return new AppDbContext(options);
+        return new AppDbContext(options, CurrentUser);
     }
 
     /// <summary>
@@ -55,6 +57,7 @@ public class IntegrationTestFactory : IAsyncLifetime
         var services = new ServiceCollection();
 
         services.AddLogging();
+        services.AddSingleton<ICurrentUserService>(CurrentUser);
         services.AddDbContext<AppDbContext>(options =>
             options.UseNpgsql(_dbContainer.GetConnectionString()));
 

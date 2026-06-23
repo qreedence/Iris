@@ -2,11 +2,13 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
+using Iris.Api.Authentication;
 using Iris.Application.AiIntegration;
 using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Queries;
+using Iris.Application.Identity.Interfaces;
 using Iris.Application.Personas;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
@@ -29,6 +31,8 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
     private async Task SendCommand<TResponse>(IRequest<TResponse> command)
     {
         using var scope = _factory.Services.CreateScope();
+        var userService = (CurrentUserService)scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+        userService.OverrideUserId = _userId;
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
         await mediator.Send(command, TestContext.Current.CancellationToken);
     }
@@ -115,6 +119,8 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
             TestContext.Current.CancellationToken);
 
         using var scope = _factory.Services.CreateScope();
+        var userService = (CurrentUserService)scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+        userService.OverrideUserId = _userId;
         var queries = scope.ServiceProvider.GetRequiredService<IConversationQueries>();
         var messages = await queries.GetMessagesAsync(_userId, conversationId, 0, 10, TestContext.Current.CancellationToken);
 

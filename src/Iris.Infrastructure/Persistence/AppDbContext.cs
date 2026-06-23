@@ -1,4 +1,5 @@
-﻿using Iris.Domain.Conversations;
+﻿using Iris.Application.Identity.Interfaces;
+using Iris.Domain.Conversations;
 using Iris.Domain.Conversations.Entities;
 using Iris.Domain.Identity.Entities;
 using Iris.Domain.Personas;
@@ -11,11 +12,15 @@ namespace Iris.Infrastructure.Persistence;
 
 public class AppDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>
 {
-    public AppDbContext(DbContextOptions<AppDbContext> options)
+    private readonly ICurrentUserService _currentUser;
+
+    public AppDbContext(DbContextOptions<AppDbContext> options, ICurrentUserService currentUser)
         : base(options)
     {
+        _currentUser = currentUser;
     }
-
+    
+    public Guid CurrentUserId => _currentUser.UserId;
     public DbSet<StoredEvent> StoredEvents { get; set; }
     public DbSet<ConversationReadModel> ConversationReadModels { get; set; }
     public DbSet<ConversationMessage> ConversationMessages { get; set; }
@@ -26,5 +31,10 @@ public class AppDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Guid
     {
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+        modelBuilder.Entity<Persona>()
+            .HasQueryFilter(p => !p.IsDeleted && p.UserId == CurrentUserId);
+
+        modelBuilder.Entity<ConversationReadModel>()
+            .HasQueryFilter(c => c.UserId == CurrentUserId);
     }
 }

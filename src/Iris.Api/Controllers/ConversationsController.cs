@@ -84,12 +84,15 @@ public class ConversationsController : ControllerBase
         var exists = await _conversationQueries.ExistsForUserAsync(userId, id, ct);
         if (!exists) return NotFound();
 
-        var command = new StartConversationTurnCommand(
-            id,
-            request.UserMessage,
-            request.Model,
-            request.ChangeModel,
-            request.ModelParameters);
+        var command = new StartConversationTurnCommand 
+        {
+            UserId = userId,
+            ConversationId = id,
+            UserMessage = request.UserMessage,
+            Model = request.Model,
+            ChangeModel = request.ChangeModel,
+            ModelParameters = request.ModelParameters
+        };
 
         await _mediator.Send(command, ct);
 
