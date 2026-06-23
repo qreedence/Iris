@@ -1,3 +1,5 @@
+using Iris.Api.Authentication;
+using Iris.Application.Conversations.Queries;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
@@ -6,9 +8,19 @@ namespace Iris.Api.Hubs;
 [Authorize]
 public class ChatHub : Hub<IChatClient>
 {
-    public Task JoinConversation(Guid conversationId)
+    private readonly IConversationQueries _conversationQueries;
+
+    public ChatHub(IConversationQueries conversationQueries)
     {
-        return Groups.AddToGroupAsync(Context.ConnectionId, GetConversationGroupName(conversationId));
+        _conversationQueries = conversationQueries;
+    }
+
+    public async Task JoinConversation(Guid conversationId)
+    {
+        if (!await _conversationQueries.ExistsForUserAsync(conversationId, Context.ConnectionAborted))
+            throw new HubException("Conversation does not exist for this user");
+
+        await Groups.AddToGroupAsync(Context.ConnectionId, GetConversationGroupName(conversationId), Context.ConnectionAborted);
     }
 
     public Task LeaveConversation(Guid conversationId)

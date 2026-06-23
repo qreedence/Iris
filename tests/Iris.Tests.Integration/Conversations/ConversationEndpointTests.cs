@@ -3,10 +3,12 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using FluentAssertions;
+using Iris.Api.Authentication;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Commands.SendMessage;
 using Iris.Application.Conversations.Queries;
+using Iris.Application.Identity.Interfaces;
 using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
 using MediatR;
@@ -35,6 +37,8 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     private async Task SendCommand<TResponse>(IRequest<TResponse> command)
     {
         using var scope = _factory.Services.CreateScope();
+        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+        userService.OverrideUserId = _userId;
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
         await mediator.Send(command, TestContext.Current.CancellationToken);
     }
@@ -392,5 +396,28 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         messages.Should().HaveCount(1);
         messages![0].Content.Should().Be("Message A");
         messages[0].ConversationId.Should().Be(conversationA);
+    }
+
+    // ── Unauthenticated coverage ──────────────────────────────────
+
+    [Fact]
+    public async Task PostConversation_WithoutAuth_Returns401()
+    {
+        using var client = _factory.CreateClient();
+        var response = await client.PostAsJsonAsync(
+            "/api/conversations",
+            new CreateConversationRequest(Guid.NewGuid(), "Nope"),
+            TestContext.Current.CancellationToken);
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task GetMessages_WithoutAuth_Returns401()
+    {
+        using var client = _factory.CreateClient();
+        var response = await client.GetAsync(
+            $"/api/conversations/{Guid.NewGuid()}/messages",
+            TestContext.Current.CancellationToken);
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 }

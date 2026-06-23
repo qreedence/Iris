@@ -5,6 +5,7 @@ namespace Iris.Application.Conversations;
 public interface IConversationTurnPreparer
 {
     Task<PreparedConversationTurn> PrepareAsync(
+        Guid userId,
         Guid conversationId,
         string requestedModel,
         bool changeModel,

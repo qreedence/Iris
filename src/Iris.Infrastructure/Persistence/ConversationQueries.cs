@@ -12,11 +12,10 @@ namespace Iris.Infrastructure.Persistence
             _db = db;
         }
 
-        public async Task<IReadOnlyList<ConversationSummaryDto>> GetAllAsync(Guid userId, int skip = 0, int take = 50, CancellationToken ct = default)
+        public async Task<IReadOnlyList<ConversationSummaryDto>> GetAllAsync(int skip = 0, int take = 50, CancellationToken ct = default)
         {
             var conversations = await _db.ConversationReadModels
                 .AsNoTracking()
-                .Where(c => c.UserId == userId)
                 .OrderByDescending(c => c.CreatedAt)
                 .Skip(skip)
                 .Take(take)
@@ -33,9 +32,9 @@ namespace Iris.Infrastructure.Persistence
             return conversations;
         }
 
-        public async Task<IReadOnlyList<ConversationMessageDto>?> GetMessagesAsync(Guid userId, Guid conversationId, int skip = 0, int take = 100, CancellationToken ct = default)
+        public async Task<IReadOnlyList<ConversationMessageDto>?> GetMessagesAsync(Guid conversationId, int skip = 0, int take = 100, CancellationToken ct = default)
         {
-            var exists = await ExistsForUserAsync(userId, conversationId, ct);
+            var exists = await ExistsForUserAsync(conversationId, ct);
 
             if (!exists)
                 return null;
@@ -57,11 +56,11 @@ namespace Iris.Infrastructure.Persistence
             return messages;
         }
 
-        public async Task<bool> ExistsForUserAsync(Guid userId, Guid conversationId, CancellationToken ct = default)
+        public async Task<bool> ExistsForUserAsync(Guid conversationId, CancellationToken ct = default)
         {
             return await _db.ConversationReadModels
                 .AsNoTracking()
-                .AnyAsync(c => c.Id == conversationId && c.UserId == userId, ct);
+                .AnyAsync(c => c.Id == conversationId, ct);
         }
     }
 }

@@ -52,8 +52,7 @@ public class ConversationsController : ControllerBase
         [FromQuery] int take = 50,
         CancellationToken ct = default)
     {
-        var userId = User.GetUserId();
-        var conversations = await _conversationQueries.GetAllAsync(userId, skip, take, ct);
+        var conversations = await _conversationQueries.GetAllAsync(skip, take, ct);
         return Ok(conversations);
     }
 
@@ -66,8 +65,7 @@ public class ConversationsController : ControllerBase
         [FromQuery] int take = 100,
         CancellationToken ct = default)
     {
-        var userId = User.GetUserId();
-        var messages = await _conversationQueries.GetMessagesAsync(userId, id, skip, take, ct);
+        var messages = await _conversationQueries.GetMessagesAsync(id, skip, take, ct);
         if (messages == null) return NotFound();
         return Ok(messages);
     }
@@ -81,15 +79,18 @@ public class ConversationsController : ControllerBase
         CancellationToken ct = default)
     {
         var userId = User.GetUserId();
-        var exists = await _conversationQueries.ExistsForUserAsync(userId, id, ct);
+        var exists = await _conversationQueries.ExistsForUserAsync(id, ct);
         if (!exists) return NotFound();
 
-        var command = new StartConversationTurnCommand(
-            id,
-            request.UserMessage,
-            request.Model,
-            request.ChangeModel,
-            request.ModelParameters);
+        var command = new StartConversationTurnCommand
+        {
+            UserId = userId,
+            ConversationId = id,
+            UserMessage = request.UserMessage,
+            Model = request.Model,
+            ChangeModel = request.ChangeModel,
+            ModelParameters = request.ModelParameters
+        };
 
         await _mediator.Send(command, ct);
 

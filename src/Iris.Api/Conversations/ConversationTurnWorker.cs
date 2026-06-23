@@ -1,4 +1,6 @@
+using Iris.Api.Authentication;
 using Iris.Application.Conversations;
+using Iris.Application.Identity.Interfaces;
 
 namespace Iris.Api.Conversations;
 
@@ -38,9 +40,12 @@ public class ConversationTurnWorker : BackgroundService
         try
         {
             using var scope = _scopeFactory.CreateScope();
+            var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+            userService.OverrideUserId = workItem.UserId;
             var orchestrator = scope.ServiceProvider.GetRequiredService<IChatStreamOrchestrator>();
 
             await orchestrator.StreamAsync(
+                workItem.UserId,
                 workItem.ConversationId,
                 workItem.Model,
                 workItem.ChangeModel,

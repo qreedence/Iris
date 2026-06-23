@@ -3,6 +3,7 @@ using Iris.Application.AiIntegration;
 using Iris.Application.AiIntegration.Models;
 using Iris.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -96,6 +97,8 @@ public class ApiTestFactory : WebApplicationFactory<Program>, IAsyncLifetime
                 services.Remove(chatProviderDescriptor);
 
             services.AddSingleton(MockChatProvider);
+
+            services.AddSignalR(options => options.EnableDetailedErrors = true);
 
             services.AddAuthentication(TestAuthHandler.SchemeName)
                 .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(

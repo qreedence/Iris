@@ -11,7 +11,6 @@ public class PersonaConfiguration : IEntityTypeConfiguration<Persona>
         builder.ToTable("personas");
 
         builder.HasKey(p => p.Id);
-        builder.HasQueryFilter(p => !p.IsDeleted);
 
         builder.HasIndex(p => p.UserId)
             .HasFilter("\"IsDeleted\" = false");

@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
+using Iris.Api.Authentication;
+using Iris.Application.Identity.Interfaces;
 using Iris.Application.Personas;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -175,10 +177,11 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
     }
 
     [Fact]
-    public async Task PutPersona_OtherUsersPersona_Returns404()
+    public async Task PutPersona_OtherUsersPersona_Returns404AndDoesNotModifyRow()
     {
         // Arrange
-        var otherPersona = await CreatePersonaForUserAsync(Guid.NewGuid(), "Other User Persona");
+        var otherUserId = Guid.NewGuid();
+        var otherPersona = await CreatePersonaForUserAsync(otherUserId, "Other User Persona");
 
         // Act
         var response = await _client.PutAsJsonAsync(
@@ -188,6 +191,9 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        var unchanged = await GetPersonaDirectAsync(otherUserId, otherPersona.Id);
+        unchanged.Name.Should().Be("Other User Persona");
     }
 
     [Fact]
@@ -222,10 +228,11 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
     }
 
     [Fact]
-    public async Task DeletePersona_OtherUsersPersona_Returns404()
+    public async Task DeletePersona_OtherUsersPersona_Returns404AndDoesNotSoftDeleteRow()
     {
         // Arrange
-        var otherPersona = await CreatePersonaForUserAsync(Guid.NewGuid(), "Other User Persona");
+        var otherUserId = Guid.NewGuid();
+        var otherPersona = await CreatePersonaForUserAsync(otherUserId, "Other User Persona");
 
         // Act
         var response = await _client.DeleteAsync(
@@ -234,6 +241,9 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        var stillExists = await GetPersonaDirectAsync(otherUserId, otherPersona.Id);
+        stillExists.Name.Should().Be("Other User Persona");
     }
 
     [Fact]
@@ -326,5 +336,48 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
             userId,
             new CreatePersonaRequest(name),
             TestContext.Current.CancellationToken);
+    }
+
+    private async Task<PersonaDto> GetPersonaDirectAsync(Guid userId, Guid personaId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+        userService.OverrideUserId = userId;
+        var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
+        return await personaService.GetByIdAsync(userId, personaId, TestContext.Current.CancellationToken);
+    }
+
+    // ── Unauthenticated coverage ──────────────────────────────────
+
+    [Fact]
+    public async Task PostPersona_WithoutAuth_Returns401()
+    {
+        using var client = _factory.CreateClient();
+        var response = await client.PostAsJsonAsync(
+            "/api/personas",
+            new CreatePersonaRequest("Nope"),
+            TestContext.Current.CancellationToken);
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task PutPersona_WithoutAuth_Returns401()
+    {
+        using var client = _factory.CreateClient();
+        var response = await client.PutAsJsonAsync(
+            $"/api/personas/{Guid.NewGuid()}",
+            new UpdatePersonaRequest("Nope"),
+            TestContext.Current.CancellationToken);
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task DeletePersona_WithoutAuth_Returns401()
+    {
+        using var client = _factory.CreateClient();
+        var response = await client.DeleteAsync(
+            $"/api/personas/{Guid.NewGuid()}",
+            TestContext.Current.CancellationToken);
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 }

@@ -61,7 +61,7 @@ public class ChatStreamOrchestratorTests
             ], call.ArgAt<CancellationToken>(1)));
 
         // Act
-        await sut.StreamAsync(conversationId, "test/model", false, null, TestContext.Current.CancellationToken);
+        await sut.StreamAsync(Guid.NewGuid(), conversationId,"test/model", false, null, TestContext.Current.CancellationToken);
 
         // Assert
         _chatProvider.Received(1).StreamAsync(chatRequest, Arg.Any<CancellationToken>());
@@ -93,7 +93,7 @@ public class ChatStreamOrchestratorTests
             ], call.ArgAt<CancellationToken>(1)));
 
         // Act
-        await sut.StreamAsync(conversationId, "new/model", true, null, TestContext.Current.CancellationToken);
+        await sut.StreamAsync(Guid.NewGuid(), conversationId,"new/model", true, null, TestContext.Current.CancellationToken);
 
         // Assert
         await _eventRecorder.Received(1).RecordAsync(
@@ -118,7 +118,7 @@ public class ChatStreamOrchestratorTests
                 call.ArgAt<CancellationToken>(1)));
 
         // Act
-        await sut.StreamAsync(conversationId, "test/model", false, null, TestContext.Current.CancellationToken);
+        await sut.StreamAsync(Guid.NewGuid(), conversationId,"test/model", false, null, TestContext.Current.CancellationToken);
 
         // Assert
         await _eventRecorder.Received(1).RecordAsync(
@@ -149,7 +149,7 @@ public class ChatStreamOrchestratorTests
                 call.ArgAt<CancellationToken>(1)));
 
         // Act
-        await sut.StreamAsync(conversationId, "test/model", false, null, TestContext.Current.CancellationToken);
+        await sut.StreamAsync(Guid.NewGuid(), conversationId,"test/model", false, null, TestContext.Current.CancellationToken);
 
         // Assert
         await _eventRecorder.Received(1).RecordAsync(
@@ -180,7 +180,7 @@ public class ChatStreamOrchestratorTests
                 call.ArgAt<CancellationToken>(1)));
 
         // Act
-        await sut.StreamAsync(conversationId, "test/model", false, null, TestContext.Current.CancellationToken);
+        await sut.StreamAsync(Guid.NewGuid(), conversationId,"test/model", false, null, TestContext.Current.CancellationToken);
 
         // Assert
         await _eventRecorder.Received(1).RecordAsync(
@@ -212,11 +212,11 @@ public class ChatStreamOrchestratorTests
         var conversationId = Guid.NewGuid();
         var personaId = Guid.NewGuid();
 
-        _turnPreparer.PrepareAsync(conversationId, Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<ModelParameters?>(), Arg.Any<CancellationToken>())
+        _turnPreparer.PrepareAsync(Arg.Any<Guid>(), conversationId, Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<ModelParameters?>(), Arg.Any<CancellationToken>())
             .Returns<Task<PreparedConversationTurn>>(_ => throw new ConversationPersonaNotFoundException(conversationId, personaId));
 
         // Act
-        await sut.StreamAsync(conversationId, "fallback/model", false, null, TestContext.Current.CancellationToken);
+        await sut.StreamAsync(Guid.NewGuid(), conversationId,"fallback/model", false, null, TestContext.Current.CancellationToken);
 
         // Assert
         await _eventRecorder.Received(1).RecordAsync(
@@ -238,7 +238,7 @@ public class ChatStreamOrchestratorTests
         ChatRequest? chatRequest = null,
         IReadOnlyList<ConversationEvent>? preStreamEvents = null)
     {
-        _turnPreparer.PrepareAsync(conversationId, Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<ModelParameters?>(), Arg.Any<CancellationToken>())
+        _turnPreparer.PrepareAsync(Arg.Any<Guid>(), conversationId, Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<ModelParameters?>(), Arg.Any<CancellationToken>())
             .Returns(new PreparedConversationTurn(
                 chatRequest ?? CreateChatRequest(),
                 preStreamEvents ?? []));

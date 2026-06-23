@@ -4,6 +4,7 @@ using Iris.Api.Hubs;
 using Iris.Application;
 using Iris.Application.Conversations;
 using Iris.Application.Exceptions;
+using Iris.Application.Identity.Interfaces;
 using Iris.Infrastructure;
 using Iris.Infrastructure.Identity;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -94,6 +95,8 @@ builder.Services.AddScoped<IChatStreamNotifier, SignalRChatStreamNotifier>();
 builder.Services.AddSingleton<IConversationTurnQueue, ConversationTurnQueue>();
 builder.Services.AddHostedService<ConversationTurnWorker>();
 builder.Services.AddScoped<AuthCookieService>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
 

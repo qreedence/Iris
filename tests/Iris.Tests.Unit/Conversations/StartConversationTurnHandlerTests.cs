@@ -35,24 +35,28 @@ public class StartConversationTurnHandlerTests
     }
 
     private static StartConversationTurnCommand CreateValidCommand(
-        Guid? conversationId = null,
-        string userMessage = "Hello!",
-        string model = "test/model",
-        bool changeModel = false,
-        ModelParameters? modelParameters = null) =>
-        new(
-            conversationId ?? Guid.NewGuid(),
-            userMessage,
-            model,
-            changeModel,
-            modelParameters);
+         Guid? userId = null,
+         Guid? conversationId = null,
+         string userMessage = "Hello!",
+         string model = "test/model",
+         bool changeModel = false,
+         ModelParameters? modelParameters = null) =>
+         new()
+         {
+             UserId = userId ?? Guid.NewGuid(),
+             ConversationId = conversationId ?? Guid.NewGuid(),
+             UserMessage = userMessage,
+             Model = model,
+             ChangeModel = changeModel,
+             ModelParameters = modelParameters
+         };
 
-    private void SetupExistingConversation(Guid conversationId)
+    private void SetupExistingConversation(Guid conversationId, Guid? ownerId = null)
     {
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns(new List<ConversationEvent>
             {
-                new ConversationCreated(conversationId, Guid.NewGuid(), Guid.NewGuid(), "Existing Conversation")
+                new ConversationCreated(conversationId, ownerId ?? Guid.NewGuid(), Guid.NewGuid(), "Existing Conversation")
             });
     }
 
@@ -60,15 +64,17 @@ public class StartConversationTurnHandlerTests
     public async Task Handle_ValidCommand_RecordsUserMessageAndEnqueuesTurn()
     {
         // Arrange
+        var userId = Guid.NewGuid();
         var conversationId = Guid.NewGuid();
         var modelParameters = new ModelParameters(0.7f, 500, 0.9f);
         var command = CreateValidCommand(
+            userId: userId,
             conversationId: conversationId,
             userMessage: "Hello from the user",
             model: "test/model",
             changeModel: true,
             modelParameters: modelParameters);
-        SetupExistingConversation(conversationId);
+        SetupExistingConversation(conversationId, ownerId: userId);
         var sut = CreateSut();
 
         // Act
@@ -191,6 +197,33 @@ public class StartConversationTurnHandlerTests
         // Assert
         await act.Should().ThrowAsync<ValidationException>()
             .WithMessage("*Content*");
+
+        await _eventRecorder.DidNotReceive().RecordAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<IEnumerable<ConversationEvent>>(),
+            Arg.Any<CancellationToken>());
+
+        await _turnQueue.DidNotReceive().EnqueueAsync(
+            Arg.Any<ConversationTurnWorkItem>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_ConversationBelongsToAnotherUser_ThrowsNotFoundAndDoesNotRecord()
+    {
+        // Arrange
+        var conversationId = Guid.NewGuid();
+        var ownerId = Guid.NewGuid();
+        var attackerId = Guid.NewGuid();
+        SetupExistingConversation(conversationId, ownerId: ownerId);
+        var sut = CreateSut();
+        var command = CreateValidCommand(userId: attackerId, conversationId: conversationId);
+
+        // Act
+        var act = () => sut.Handle(command, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<NotFoundException>();
 
         await _eventRecorder.DidNotReceive().RecordAsync(
             Arg.Any<Guid>(),

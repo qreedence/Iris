@@ -18,6 +18,7 @@ public class ConversationTurnPreparer : IConversationTurnPreparer
     }
 
     public async Task<PreparedConversationTurn> PrepareAsync(
+        Guid userId,
         Guid conversationId,
         string requestedModel,
         bool changeModel,
@@ -32,7 +33,7 @@ public class ConversationTurnPreparer : IConversationTurnPreparer
             throw new NotFoundException("Conversation does not exist.");
 
         var conversationCreated = events.OfType<ConversationCreated>().FirstOrDefault();
-        if (conversationCreated is null)
+        if (conversationCreated is null || userId != conversationCreated.UserId)
             throw new NotFoundException("Conversation does not exist.");
 
         PersonaDto persona;

@@ -2,11 +2,13 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
+using Iris.Api.Authentication;
 using Iris.Application.AiIntegration;
 using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Queries;
+using Iris.Application.Identity.Interfaces;
 using Iris.Application.Personas;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
@@ -29,6 +31,8 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
     private async Task SendCommand<TResponse>(IRequest<TResponse> command)
     {
         using var scope = _factory.Services.CreateScope();
+        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+        userService.OverrideUserId = _userId;
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
         await mediator.Send(command, TestContext.Current.CancellationToken);
     }
@@ -84,11 +88,17 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
     }
 
     [Fact]
-    public async Task PostChat_OtherUsersConversation_Returns404()
+    public async Task PostChat_OtherUsersConversation_Returns404AndDoesNotAppendEvents()
     {
         // Arrange
+        var otherUserId = Guid.NewGuid();
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), Guid.NewGuid(), "Not Mine"));
+        await SendCommand(new CreateConversationCommand(conversationId, otherUserId, Guid.NewGuid(), "Not Mine"));
+
+        // Count events before
+        using var scopeBefore = _factory.Services.CreateScope();
+        var storeBefore = scopeBefore.ServiceProvider.GetRequiredService<IEventStore>();
+        var eventsBefore = await storeBefore.LoadStreamAsync(conversationId, TestContext.Current.CancellationToken);
 
         // Act
         var response = await _client.PostAsJsonAsync(
@@ -98,6 +108,12 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        using var scopeAfter = _factory.Services.CreateScope();
+        var storeAfter = scopeAfter.ServiceProvider.GetRequiredService<IEventStore>();
+        var eventsAfter = await storeAfter.LoadStreamAsync(conversationId, TestContext.Current.CancellationToken);
+
+        eventsAfter.Should().HaveCount(eventsBefore.Count, "no events should be appended for another user's conversation");
     }
 
     [Fact]
@@ -115,8 +131,10 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
             TestContext.Current.CancellationToken);
 
         using var scope = _factory.Services.CreateScope();
+        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+        userService.OverrideUserId = _userId;
         var queries = scope.ServiceProvider.GetRequiredService<IConversationQueries>();
-        var messages = await queries.GetMessagesAsync(_userId, conversationId, 0, 10, TestContext.Current.CancellationToken);
+        var messages = await queries.GetMessagesAsync(conversationId, 0, 10, TestContext.Current.CancellationToken);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
@@ -311,6 +329,19 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         await Task.Yield();
         ct.ThrowIfCancellationRequested();
         yield return new StreamedChunk(null, true, new UsageInfo(10, 5, 15));
+    }
+
+    // ── Unauthenticated coverage ──────────────────────────────────
+
+    [Fact]
+    public async Task PostChat_WithoutAuth_Returns401()
+    {
+        using var client = _factory.CreateClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/conversations/{Guid.NewGuid()}/chat",
+            CreateChatRequest(),
+            TestContext.Current.CancellationToken);
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition)
