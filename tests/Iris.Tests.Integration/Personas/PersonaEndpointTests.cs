@@ -341,7 +341,7 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
     private async Task<PersonaDto> GetPersonaDirectAsync(Guid userId, Guid personaId)
     {
         using var scope = _factory.Services.CreateScope();
-        var userService = (CurrentUserService)scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
         userService.OverrideUserId = userId;
         var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
         return await personaService.GetByIdAsync(userId, personaId, TestContext.Current.CancellationToken);

@@ -45,7 +45,7 @@ public class ChatHubIsolationTests
         var userId = Guid.NewGuid();
         var conversationId = Guid.NewGuid();
 
-        _queries.ExistsForUserAsync(userId, conversationId, Arg.Any<CancellationToken>())
+        _queries.ExistsForUserAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns(true);
 
         var hub = CreateHub(userId);
@@ -67,7 +67,7 @@ public class ChatHubIsolationTests
         var userId = Guid.NewGuid();
         var conversationId = Guid.NewGuid();
 
-        _queries.ExistsForUserAsync(userId, conversationId, Arg.Any<CancellationToken>())
+        _queries.ExistsForUserAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns(false);
 
         var hub = CreateHub(userId);
@@ -91,7 +91,7 @@ public class ChatHubIsolationTests
         var userId = Guid.NewGuid();
         var conversationId = Guid.NewGuid();
 
-        _queries.ExistsForUserAsync(userId, conversationId, Arg.Any<CancellationToken>())
+        _queries.ExistsForUserAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns(false);
 
         var hub = CreateHub(userId);

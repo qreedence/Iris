@@ -31,7 +31,7 @@ public class TenantIsolationTests : IClassFixture<ApiTestFactory>
     private async Task SendCommandAs<TResponse>(Guid userId, IRequest<TResponse> command)
     {
         using var scope = _factory.Services.CreateScope();
-        var userService = (CurrentUserService)scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
         userService.OverrideUserId = userId;
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
         await mediator.Send(command, TestContext.Current.CancellationToken);
@@ -39,7 +39,7 @@ public class TenantIsolationTests : IClassFixture<ApiTestFactory>
 
     private IConversationQueries CreateQueriesAs(IServiceScope scope, Guid userId)
     {
-        var userService = (CurrentUserService)scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
         userService.OverrideUserId = userId;
         return scope.ServiceProvider.GetRequiredService<IConversationQueries>();
     }
@@ -58,7 +58,7 @@ public class TenantIsolationTests : IClassFixture<ApiTestFactory>
         // Act — query as user A
         using var scope = _factory.Services.CreateScope();
         var queries = CreateQueriesAs(scope, _userA);
-        var results = await queries.GetAllAsync(_userA, 0, 50, TestContext.Current.CancellationToken);
+        var results = await queries.GetAllAsync(0, 50, TestContext.Current.CancellationToken);
 
         // Assert
         results.Should().Contain(c => c.Id == convA);
@@ -78,7 +78,7 @@ public class TenantIsolationTests : IClassFixture<ApiTestFactory>
         // Act — query as user B
         using var scope = _factory.Services.CreateScope();
         var queries = CreateQueriesAs(scope, _userB);
-        var messages = await queries.GetMessagesAsync(_userB, convA, 0, 100, TestContext.Current.CancellationToken);
+        var messages = await queries.GetMessagesAsync(convA, 0, 100, TestContext.Current.CancellationToken);
 
         // Assert
         messages.Should().BeNull("user B should not see user A's conversation");
@@ -96,7 +96,7 @@ public class TenantIsolationTests : IClassFixture<ApiTestFactory>
         // Act — check as user B
         using var scope = _factory.Services.CreateScope();
         var queries = CreateQueriesAs(scope, _userB);
-        var exists = await queries.ExistsForUserAsync(_userB, convA, TestContext.Current.CancellationToken);
+        var exists = await queries.ExistsForUserAsync(convA, TestContext.Current.CancellationToken);
 
         // Assert
         exists.Should().BeFalse();
@@ -165,14 +165,14 @@ public class TenantIsolationTests : IClassFixture<ApiTestFactory>
         // Assert — read as the correct user to see it through the filter
         using var scope = _factory.Services.CreateScope();
         var queries = CreateQueriesAs(scope, _userA);
-        var conversations = await queries.GetAllAsync(_userA, 0, 50, TestContext.Current.CancellationToken);
+        var conversations = await queries.GetAllAsync(0, 50, TestContext.Current.CancellationToken);
 
         conversations.Should().Contain(c => c.Id == convId);
 
         // And NOT visible to another user
         using var scopeB = _factory.Services.CreateScope();
         var queriesB = CreateQueriesAs(scopeB, _userB);
-        var conversationsB = await queriesB.GetAllAsync(_userB, 0, 50, TestContext.Current.CancellationToken);
+        var conversationsB = await queriesB.GetAllAsync(0, 50, TestContext.Current.CancellationToken);
 
         conversationsB.Should().NotContain(c => c.Id == convId);
     }

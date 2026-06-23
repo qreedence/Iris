@@ -37,7 +37,7 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     private async Task SendCommand<TResponse>(IRequest<TResponse> command)
     {
         using var scope = _factory.Services.CreateScope();
-        var userService = (CurrentUserService)scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
         userService.OverrideUserId = _userId;
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
         await mediator.Send(command, TestContext.Current.CancellationToken);

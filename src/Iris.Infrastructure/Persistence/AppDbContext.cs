@@ -19,7 +19,7 @@ public class AppDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Guid
     {
         _currentUser = currentUser;
     }
-    
+
     public Guid CurrentUserId => _currentUser.UserId;
     public DbSet<StoredEvent> StoredEvents { get; set; }
     public DbSet<ConversationReadModel> ConversationReadModels { get; set; }

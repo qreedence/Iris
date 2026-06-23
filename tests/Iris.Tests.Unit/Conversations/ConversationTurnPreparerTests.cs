@@ -13,6 +13,7 @@ public class ConversationTurnPreparerTests
 {
     private readonly IEventStore _eventStore = Substitute.For<IEventStore>();
     private readonly IPersonaService _personaService = Substitute.For<IPersonaService>();
+    private readonly Guid _userId = Guid.NewGuid();
 
     private ConversationTurnPreparer CreateSut() => new(_eventStore, _personaService);
 
@@ -27,7 +28,7 @@ public class ConversationTurnPreparerTests
 
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns([
-                new ConversationCreated(conversationId, Guid.NewGuid(), personaId, "Chat"),
+                new ConversationCreated(conversationId, _userId, personaId, "Chat"),
                 new MessageSent(Guid.NewGuid(), conversationId, "First user message", ChatRole.User),
                 new AssistantResponseCompleted(Guid.NewGuid(), conversationId, "First assistant response", "test/model"),
                 new MessageSent(Guid.NewGuid(), conversationId, "Second user message", ChatRole.User)
@@ -36,6 +37,7 @@ public class ConversationTurnPreparerTests
 
         // Act
         var prepared = await sut.PrepareAsync(
+            _userId,
             conversationId,
             "fallback/model",
             changeModel: false,
@@ -66,6 +68,7 @@ public class ConversationTurnPreparerTests
 
         // Act
         var prepared = await sut.PrepareAsync(
+            _userId,
             conversationId,
             "persona/model",
             changeModel: false,
@@ -89,6 +92,7 @@ public class ConversationTurnPreparerTests
 
         // Act
         var prepared = await sut.PrepareAsync(
+            _userId,
             conversationId,
             "frontend/fallback",
             changeModel: false,
@@ -112,6 +116,7 @@ public class ConversationTurnPreparerTests
 
         // Act
         var prepared = await sut.PrepareAsync(
+            _userId,
             conversationId,
             "fallback/model",
             changeModel: false,
@@ -135,6 +140,7 @@ public class ConversationTurnPreparerTests
 
         // Act
         var prepared = await sut.PrepareAsync(
+            _userId,
             conversationId,
             "new/model",
             changeModel: true,
@@ -156,7 +162,7 @@ public class ConversationTurnPreparerTests
         var personaId = Guid.NewGuid();
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns([
-                new ConversationCreated(conversationId, Guid.NewGuid(), personaId, "Chat"),
+                new ConversationCreated(conversationId, _userId, personaId, "Chat"),
                 new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User),
                 new ModelChanged(conversationId, "changed/model")
             ]);
@@ -164,6 +170,7 @@ public class ConversationTurnPreparerTests
 
         // Act
         var prepared = await sut.PrepareAsync(
+            _userId,
             conversationId,
             "changed/model",
             changeModel: false,
@@ -184,7 +191,7 @@ public class ConversationTurnPreparerTests
         var personaId = Guid.NewGuid();
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns([
-                new ConversationCreated(conversationId, Guid.NewGuid(), personaId, "Chat"),
+                new ConversationCreated(conversationId, _userId, personaId, "Chat"),
                 new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User),
                 new ModelChanged(conversationId, "old/model")
             ]);
@@ -192,6 +199,7 @@ public class ConversationTurnPreparerTests
 
         // Act
         var prepared = await sut.PrepareAsync(
+            _userId,
             conversationId,
             "newer/model",
             changeModel: true,
@@ -217,6 +225,7 @@ public class ConversationTurnPreparerTests
 
         // Act
         var act = () => sut.PrepareAsync(
+            _userId,
             conversationId,
             "fallback/model",
             changeModel: false,
@@ -240,6 +249,7 @@ public class ConversationTurnPreparerTests
 
         // Act
         var act = () => sut.PrepareAsync(
+            _userId,
             conversationId,
             "fallback/model",
             changeModel: false,
@@ -263,6 +273,7 @@ public class ConversationTurnPreparerTests
 
         // Act
         var act = () => sut.PrepareAsync(
+            _userId,
             conversationId,
             requestedModel!,
             changeModel: false,
@@ -278,7 +289,7 @@ public class ConversationTurnPreparerTests
     {
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns([
-                new ConversationCreated(conversationId, Guid.NewGuid(), personaId, "Chat"),
+                new ConversationCreated(conversationId, _userId, personaId, "Chat"),
                 new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User)
             ]);
     }

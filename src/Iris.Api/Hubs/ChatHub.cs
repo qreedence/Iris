@@ -17,8 +17,7 @@ public class ChatHub : Hub<IChatClient>
 
     public async Task JoinConversation(Guid conversationId)
     {
-        var userId = Context.User!.GetUserId();
-        if (!await _conversationQueries.ExistsForUserAsync(userId, conversationId, Context.ConnectionAborted))
+        if (!await _conversationQueries.ExistsForUserAsync(conversationId, Context.ConnectionAborted))
             throw new HubException("Conversation does not exist for this user");
 
         await Groups.AddToGroupAsync(Context.ConnectionId, GetConversationGroupName(conversationId), Context.ConnectionAborted);

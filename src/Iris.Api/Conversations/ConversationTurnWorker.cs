@@ -40,11 +40,12 @@ public class ConversationTurnWorker : BackgroundService
         try
         {
             using var scope = _scopeFactory.CreateScope();
-            var userService = (CurrentUserService)scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+            var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
             userService.OverrideUserId = workItem.UserId;
             var orchestrator = scope.ServiceProvider.GetRequiredService<IChatStreamOrchestrator>();
 
             await orchestrator.StreamAsync(
+                workItem.UserId,
                 workItem.ConversationId,
                 workItem.Model,
                 workItem.ChangeModel,

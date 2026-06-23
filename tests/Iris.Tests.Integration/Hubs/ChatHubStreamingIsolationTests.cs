@@ -41,7 +41,7 @@ public class ChatHubStreamingIsolationTests : IClassFixture<ApiTestFactory>
     private async Task SendCommandAs<TResponse>(Guid userId, IRequest<TResponse> command)
     {
         using var scope = _factory.Services.CreateScope();
-        var userService = (CurrentUserService)scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
         userService.OverrideUserId = userId;
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
         await mediator.Send(command, TestContext.Current.CancellationToken);
@@ -50,7 +50,7 @@ public class ChatHubStreamingIsolationTests : IClassFixture<ApiTestFactory>
     private async Task<Guid> CreatePersonaForUserAsync(Guid userId)
     {
         using var scope = _factory.Services.CreateScope();
-        var userService = (CurrentUserService)scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
         userService.OverrideUserId = userId;
         var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
         var persona = await personaService.CreateAsync(

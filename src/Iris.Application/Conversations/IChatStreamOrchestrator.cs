@@ -5,6 +5,7 @@ namespace Iris.Application.Conversations;
 public interface IChatStreamOrchestrator
 {
     Task StreamAsync(
+        Guid userId,
         Guid conversationId,
         string model,
         bool changeModel,

@@ -1,4 +1,5 @@
 using Iris.Application.Exceptions;
+using Iris.Application.Identity.Interfaces;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
 using MediatR;
@@ -33,7 +34,9 @@ public class StartConversationTurnHandler : IRequestHandler<StartConversationTur
             throw new ValidationException("Model can not be empty.");
 
         var events = await _eventStore.LoadStreamAsync(command.ConversationId, ct);
-        if (events.Count == 0)
+
+        var created = events.OfType<ConversationCreated>().FirstOrDefault();
+        if (created is null || created.UserId != command.UserId)
             throw new NotFoundException("Conversation does not exist.");
 
         var message = new MessageSent(

@@ -14,7 +14,7 @@ namespace Iris.Api.Authentication
         public Guid? OverrideUserId { get; set; }
 
         public Guid UserId
-            => OverrideUserId 
+            => OverrideUserId
                 ?? _httpContextAccessor.HttpContext?.User.GetUserId()
                 ?? Guid.Empty;
 
