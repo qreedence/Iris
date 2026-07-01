@@ -39,14 +39,14 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
 
     private async Task<PersonaDto> CreatePersonaAsync(
         string name = "Iris",
-        string? systemPrompt = null,
+        SystemPromptSectionsRequest? systemPrompt = null,
         string? modelPreference = null)
     {
         using var scope = _factory.Services.CreateScope();
         var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
         return await personaService.CreateAsync(
             _userId,
-            new CreatePersonaRequest(name, systemPrompt, modelPreference),
+            new CreatePersonaRequest(name, systemPrompt, ModelPreference: modelPreference),
             TestContext.Current.CancellationToken);
     }
 
@@ -179,7 +179,7 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
     }
 
     [Fact]
-    public async Task PostChat_PersonaWithSystemPrompt_ProviderReceivesPrompt()
+    public async Task PostChat_PersonaWithSystemPrompt_ProviderReceivesAssembledPrompt()
     {
         // Arrange
         ChatRequest? capturedRequest = null;
@@ -190,7 +190,9 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
                 call.ArgAt<CancellationToken>(1)));
 
         var userMessage = $"prompt-test-{Guid.NewGuid()}";
-        var persona = await CreatePersonaAsync(systemPrompt: "Answer as Iris.");
+        var persona = await CreatePersonaAsync(systemPrompt: new SystemPromptSectionsRequest(
+            Identity: "Answer as Iris.",
+            Voice: "Warm and concise."));
         var conversationId = Guid.NewGuid();
         await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
 
@@ -203,7 +205,19 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
         await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == userMessage);
-        capturedRequest!.SystemPrompt.Should().Be("Answer as Iris.");
+        capturedRequest!.SystemPrompt.Should().Be(
+            "<app_context>" + Environment.NewLine +
+            "Test app context" + Environment.NewLine +
+            "</app_context>" + Environment.NewLine + Environment.NewLine +
+            "<guidelines>" + Environment.NewLine +
+            "Test guidelines" + Environment.NewLine +
+            "</guidelines>" + Environment.NewLine + Environment.NewLine +
+            "<identity>" + Environment.NewLine +
+            "Answer as Iris." + Environment.NewLine +
+            "</identity>" + Environment.NewLine + Environment.NewLine +
+            "<voice>" + Environment.NewLine +
+            "Warm and concise." + Environment.NewLine +
+            "</voice>");
     }
 
     [Fact]

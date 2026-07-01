@@ -10,11 +10,16 @@ public class ConversationTurnPreparer : IConversationTurnPreparer
 {
     private readonly IEventStore _eventStore;
     private readonly IPersonaService _personaService;
+    private readonly ISystemPromptAssembler _systemPromptAssembler;
 
-    public ConversationTurnPreparer(IEventStore eventStore, IPersonaService personaService)
+    public ConversationTurnPreparer(
+        IEventStore eventStore,
+        IPersonaService personaService,
+        ISystemPromptAssembler systemPromptAssembler)
     {
         _eventStore = eventStore;
         _personaService = personaService;
+        _systemPromptAssembler = systemPromptAssembler;
     }
 
     public async Task<PreparedConversationTurn> PrepareAsync(
@@ -59,10 +64,12 @@ public class ConversationTurnPreparer : IConversationTurnPreparer
             effectiveModel = requestedModel;
         }
 
+        var assembledSystemPrompt = await _systemPromptAssembler.BuildAsync(persona.SystemPrompt, ct);
+
         var chatRequest = new ChatRequest(
             effectiveModel,
             BuildMessageHistory(events),
-            persona.SystemPrompt,
+            assembledSystemPrompt,
             modelParameters);
 
         return new PreparedConversationTurn(chatRequest, preStreamEvents);

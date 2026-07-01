@@ -48,6 +48,9 @@ namespace Iris.Infrastructure
                 .Validate(options => options.RefreshTokenExpirationDays > 0, "Jwt refresh token expiration must be greater than zero.")
                 .ValidateOnStart();
 
+            services.AddOptions<IrisSystemPromptOptions>()
+                .Bind(configuration.GetSection(IrisSystemPromptOptions.SectionName));
+
             services.AddHttpClient<IChatProvider, OpenRouterChatProvider>((sp, client) =>
             {
                 var options = sp.GetRequiredService<IOptions<OpenRouterOptions>>().Value;
@@ -63,6 +66,8 @@ namespace Iris.Infrastructure
             services.AddScoped<IConversationQueries, ConversationQueries>();
             services.AddScoped<IEventStore, EfEventStore>();
             services.AddScoped<IPersonaService, PersonaService>();
+            services.AddScoped<ISystemPromptService, SystemPromptService>();
+            services.AddSingleton<IGlobalSystemPromptProvider, ConfigurationGlobalSystemPromptProvider>();
             services.AddScoped<ITokenService, JwtTokenService>();
             services.AddScoped<IAuthService, AuthService>();
 

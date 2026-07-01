@@ -1,4 +1,5 @@
 using Iris.Api.Authentication;
+using Iris.Application.Exceptions;
 using Iris.Application.Personas;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -11,10 +12,14 @@ namespace Iris.Api.Controllers;
 public class PersonasController : ControllerBase
 {
     private readonly IPersonaService _personaService;
+    private readonly ISystemPromptService _systemPromptService;
 
-    public PersonasController(IPersonaService personaService)
+    public PersonasController(
+        IPersonaService personaService,
+        ISystemPromptService systemPromptService)
     {
         _personaService = personaService;
+        _systemPromptService = systemPromptService;
     }
 
     [HttpPost]
@@ -63,6 +68,78 @@ public class PersonasController : ControllerBase
         var userId = User.GetUserId();
         var persona = await _personaService.UpdateAsync(userId, id, request, ct);
         return Ok(persona);
+    }
+
+    [HttpGet("{id:guid}/system-prompt")]
+    [ProducesResponseType<SystemPromptDto>(200)]
+    [ProducesResponseType<ProblemDetails>(404)]
+    public async Task<IActionResult> GetSystemPrompt(
+        Guid id,
+        CancellationToken ct = default)
+    {
+        var userId = User.GetUserId();
+        var systemPrompt = await _systemPromptService.GetByPersonaIdAsync(userId, id, ct);
+        return Ok(systemPrompt);
+    }
+
+    [HttpPut("{id:guid}/system-prompt")]
+    [ProducesResponseType<SystemPromptDto>(200)]
+    [ProducesResponseType<ProblemDetails>(400)]
+    [ProducesResponseType<ProblemDetails>(404)]
+    public async Task<IActionResult> UpdateSystemPrompt(
+        Guid id,
+        [FromBody] SystemPromptSectionsRequest request,
+        CancellationToken ct = default)
+    {
+        var userId = User.GetUserId();
+        var systemPrompt = await _systemPromptService.UpdateAsync(userId, id, request, ct);
+        return Ok(systemPrompt);
+    }
+
+    [HttpPut("{id:guid}/system-prompt/sections/{section}")]
+    [ProducesResponseType<SystemPromptDto>(200)]
+    [ProducesResponseType<ProblemDetails>(400)]
+    [ProducesResponseType<ProblemDetails>(404)]
+    public async Task<IActionResult> UpdateSystemPromptSection(
+        Guid id,
+        string section,
+        [FromBody] UpdateSystemPromptSectionRequest request,
+        CancellationToken ct = default)
+    {
+        if (!SystemPromptSectionParser.TryParse(section, out var parsedSection))
+            throw new ValidationException("Invalid system prompt section.");
+
+        var userId = User.GetUserId();
+        var systemPrompt = await _systemPromptService.UpdateSectionAsync(
+            userId,
+            id,
+            parsedSection,
+            request.Content,
+            ct);
+
+        return Ok(systemPrompt);
+    }
+
+    [HttpDelete("{id:guid}/system-prompt/sections/{section}")]
+    [ProducesResponseType<SystemPromptDto>(200)]
+    [ProducesResponseType<ProblemDetails>(400)]
+    [ProducesResponseType<ProblemDetails>(404)]
+    public async Task<IActionResult> ClearSystemPromptSection(
+        Guid id,
+        string section,
+        CancellationToken ct = default)
+    {
+        if (!SystemPromptSectionParser.TryParse(section, out var parsedSection))
+            throw new ValidationException("Invalid system prompt section.");
+
+        var userId = User.GetUserId();
+        var systemPrompt = await _systemPromptService.ClearSectionAsync(
+            userId,
+            id,
+            parsedSection,
+            ct);
+
+        return Ok(systemPrompt);
     }
 
     [HttpDelete("{id:guid}")]

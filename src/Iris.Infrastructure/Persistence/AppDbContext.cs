@@ -25,6 +25,7 @@ public class AppDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Guid
     public DbSet<ConversationReadModel> ConversationReadModels { get; set; }
     public DbSet<ConversationMessage> ConversationMessages { get; set; }
     public DbSet<Persona> Personas { get; set; }
+    public DbSet<SystemPrompt> SystemPrompts { get; set; }
     public DbSet<RefreshToken> RefreshTokens { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -33,6 +34,9 @@ public class AppDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Guid
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
         modelBuilder.Entity<Persona>()
             .HasQueryFilter(p => !p.IsDeleted && p.UserId == CurrentUserId);
+
+        modelBuilder.Entity<SystemPrompt>()
+            .HasQueryFilter(sp => !sp.Persona.IsDeleted && sp.Persona.UserId == CurrentUserId);
 
         modelBuilder.Entity<ConversationReadModel>()
             .HasQueryFilter(c => c.UserId == CurrentUserId);

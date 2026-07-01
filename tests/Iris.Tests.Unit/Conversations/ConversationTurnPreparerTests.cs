@@ -13,12 +13,20 @@ public class ConversationTurnPreparerTests
 {
     private readonly IEventStore _eventStore = Substitute.For<IEventStore>();
     private readonly IPersonaService _personaService = Substitute.For<IPersonaService>();
+    private readonly ISystemPromptAssembler _systemPromptAssembler = Substitute.For<ISystemPromptAssembler>();
     private readonly Guid _userId = Guid.NewGuid();
 
-    private ConversationTurnPreparer CreateSut() => new(_eventStore, _personaService);
+    private ConversationTurnPreparer CreateSut()
+    {
+        _systemPromptAssembler
+            .BuildAsync(Arg.Any<SystemPromptDto>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<SystemPromptDto>().Identity);
+
+        return new ConversationTurnPreparer(_eventStore, _personaService, _systemPromptAssembler);
+    }
 
     [Fact]
-    public async Task PrepareAsync_ExistingConversation_BuildsChatRequestWithHistoryAndPersonaPrompt()
+    public async Task PrepareAsync_ExistingConversation_BuildsChatRequestWithHistoryAndAssembledPersonaPrompt()
     {
         // Arrange
         var sut = CreateSut();
@@ -33,7 +41,10 @@ public class ConversationTurnPreparerTests
                 new AssistantResponseCompleted(Guid.NewGuid(), conversationId, "First assistant response", "test/model"),
                 new MessageSent(Guid.NewGuid(), conversationId, "Second user message", ChatRole.User)
             ]);
-        SetupPersona(personaId, systemPrompt: "You are Iris.");
+        SetupPersona(personaId, identity: "You are Iris.");
+        _systemPromptAssembler
+            .BuildAsync(Arg.Any<SystemPromptDto>(), Arg.Any<CancellationToken>())
+            .Returns("<identity>You are Iris.</identity>");
 
         // Act
         var prepared = await sut.PrepareAsync(
@@ -46,7 +57,7 @@ public class ConversationTurnPreparerTests
 
         // Assert
         prepared.ChatRequest.Model.Should().Be("fallback/model");
-        prepared.ChatRequest.SystemPrompt.Should().Be("You are Iris.");
+        prepared.ChatRequest.SystemPrompt.Should().Be("<identity>You are Iris.</identity>");
         prepared.ChatRequest.ModelParameters.Should().Be(modelParameters);
         prepared.ChatRequest.Messages.Should().Equal([
             new ChatMessage(ChatRole.User, "First user message"),
@@ -54,6 +65,39 @@ public class ConversationTurnPreparerTests
             new ChatMessage(ChatRole.User, "Second user message")
         ]);
         prepared.PreStreamEvents.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PrepareAsync_UsesSystemPromptAssemblerInsteadOfRawPersonaSection()
+    {
+        // Arrange
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
+        var systemPrompt = new SystemPromptDto(
+            "Raw identity",
+            "Raw voice",
+            "Raw role",
+            "Raw relationship",
+            "Raw tools");
+
+        SetupExistingConversation(conversationId, personaId);
+        SetupPersona(personaId, systemPrompt);
+        _systemPromptAssembler
+            .BuildAsync(systemPrompt, Arg.Any<CancellationToken>())
+            .Returns("assembled prompt");
+
+        // Act
+        var prepared = await sut.PrepareAsync(
+            _userId,
+            conversationId,
+            "fallback/model",
+            changeModel: false,
+            modelParameters: null,
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        prepared.ChatRequest.SystemPrompt.Should().Be("assembled prompt");
     }
 
     [Fact]
@@ -322,13 +366,27 @@ public class ConversationTurnPreparerTests
         await act.Should().ThrowAsync<NotFoundException>();
     }
 
-    private void SetupPersona(Guid personaId, string? systemPrompt = null, string? modelPreference = null)
+    private void SetupPersona(
+        Guid personaId,
+        string? identity = null,
+        string? modelPreference = null)
+    {
+        SetupPersona(
+            personaId,
+            new SystemPromptDto(identity, null, null, null, null),
+            modelPreference);
+    }
+
+    private void SetupPersona(
+        Guid personaId,
+        SystemPromptDto? systemPrompt,
+        string? modelPreference = null)
     {
         _personaService.GetForConversationAsync(personaId, Arg.Any<CancellationToken>())
             .Returns(new PersonaDto(
                 personaId,
                 "Iris",
-                systemPrompt,
+                systemPrompt ?? SystemPromptDto.Empty,
                 modelPreference,
                 null,
                 null,

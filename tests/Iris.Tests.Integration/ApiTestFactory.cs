@@ -73,7 +73,9 @@ public class ApiTestFactory : WebApplicationFactory<Program>, IAsyncLifetime
                 ["Jwt:AccessTokenExpirationMinutes"] = "15",
                 ["Jwt:RefreshTokenExpirationDays"] = "14",
                 ["Google:ClientId"] = "test-google-client-id",
-                ["Google:ClientSecret"] = "test-google-client-secret"
+                ["Google:ClientSecret"] = "test-google-client-secret",
+                ["IrisSystemPrompt:AppContext"] = "Test app context",
+                ["IrisSystemPrompt:Guidelines"] = "Test guidelines"
             });
         });
 
