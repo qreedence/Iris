@@ -10,6 +10,7 @@ namespace Iris.Application
             services.AddScoped<Conversations.IChatStreamOrchestrator, Conversations.ChatStreamOrchestrator>();
             services.AddScoped<Conversations.IConversationEventRecorder, Conversations.ConversationEventRecorder>();
             services.AddScoped<Conversations.IConversationTurnPreparer, Conversations.ConversationTurnPreparer>();
+            services.AddScoped<Personas.ISystemPromptAssembler, Personas.SystemPromptAssembler>();
             return services;
         }
     }

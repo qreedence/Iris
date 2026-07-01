@@ -14,7 +14,14 @@ public class PersonaService : IPersonaService
         new PersonaDto(
             p.Id,
             p.Name,
-            p.SystemPrompt,
+            p.SystemPrompt == null
+                ? SystemPromptDto.Empty
+                : new SystemPromptDto(
+                    p.SystemPrompt.Identity,
+                    p.SystemPrompt.Voice,
+                    p.SystemPrompt.Role,
+                    p.SystemPrompt.Relationship,
+                    p.SystemPrompt.ToolInstructions),
             p.ModelPreference,
             p.Role,
             p.Group,
@@ -55,6 +62,7 @@ public class PersonaService : IPersonaService
     public async Task<PersonaDto> CreateAsync(Guid userId, CreatePersonaRequest request, CancellationToken ct = default)
     {
         ValidateName(request.Name);
+        SystemPromptRequestValidator.EnsureOnlyEditableSections(request.SystemPrompt);
 
         var now = DateTimeOffset.UtcNow;
         var persona = new Persona
@@ -62,7 +70,7 @@ public class PersonaService : IPersonaService
             Id = Guid.NewGuid(),
             UserId = userId,
             Name = request.Name,
-            SystemPrompt = request.SystemPrompt,
+            SystemPrompt = CreateSystemPrompt(request.SystemPrompt, now),
             ModelPreference = request.ModelPreference,
             Role = request.Role,
             Group = request.Group,
@@ -87,13 +95,13 @@ public class PersonaService : IPersonaService
         ValidateName(request.Name);
 
         var persona = await _db.Personas
+            .Include(p => p.SystemPrompt)
             .FirstOrDefaultAsync(p => p.UserId == userId && p.Id == id, ct);
 
         if (persona is null)
             throw new NotFoundException("Persona not found.");
 
         persona.Name = request.Name;
-        persona.SystemPrompt = request.SystemPrompt;
         persona.ModelPreference = request.ModelPreference;
         persona.Role = request.Role;
         persona.Group = request.Group;
@@ -113,6 +121,7 @@ public class PersonaService : IPersonaService
     public async Task DeleteAsync(Guid userId, Guid id, CancellationToken ct = default)
     {
         var persona = await _db.Personas
+            .Include(p => p.SystemPrompt)
             .FirstOrDefaultAsync(p => p.UserId == userId && p.Id == id, ct);
 
         if (persona is null)
@@ -150,5 +159,24 @@ public class PersonaService : IPersonaService
     private static PersonaDto ToDto(Persona persona)
     {
         return MapToDto(persona);
+    }
+
+    private static SystemPrompt CreateSystemPrompt(SystemPromptSectionsRequest? request, DateTimeOffset now)
+    {
+        return new SystemPrompt
+        {
+            Identity = NormalizeSection(request?.Identity),
+            Voice = NormalizeSection(request?.Voice),
+            Role = NormalizeSection(request?.Role),
+            Relationship = NormalizeSection(request?.Relationship),
+            ToolInstructions = NormalizeSection(request?.ToolInstructions),
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+    }
+
+    private static string? NormalizeSection(string? content)
+    {
+        return string.IsNullOrWhiteSpace(content) ? null : content.Trim();
     }
 }

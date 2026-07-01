@@ -3,7 +3,7 @@ namespace Iris.Application.Personas;
 public record PersonaDto(
     Guid Id,
     string Name,
-    string? SystemPrompt,
+    SystemPromptDto SystemPrompt,
     string? ModelPreference,
     string? Role,
     string? Group,

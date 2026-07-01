@@ -3,6 +3,7 @@ using Iris.Application.AiIntegration;
 using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations;
 using Iris.Application.Identity.Interfaces;
+using Iris.Application.Personas;
 using Iris.Infrastructure;
 using Iris.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -62,6 +63,8 @@ public class IntegrationTestFactory : IAsyncLifetime
             options.UseNpgsql(_dbContainer.GetConnectionString()));
 
         services.AddApplication();
+        services.AddSingleton<IGlobalSystemPromptProvider>(
+            new TestGlobalSystemPromptProvider("Test app context", "Test guidelines"));
         services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(EfEventStore).Assembly));
         services.AddScoped<IEventStore, EfEventStore>();
         services.AddSingleton(MockChatProvider);
@@ -80,5 +83,20 @@ public class IntegrationTestFactory : IAsyncLifetime
     public async ValueTask DisposeAsync()
     {
         await _dbContainer.StopAsync();
+    }
+
+    private class TestGlobalSystemPromptProvider : IGlobalSystemPromptProvider
+    {
+        private readonly GlobalSystemPromptSections _sections;
+
+        public TestGlobalSystemPromptProvider(string? appContext, string? guidelines)
+        {
+            _sections = new GlobalSystemPromptSections(appContext, guidelines);
+        }
+
+        public Task<GlobalSystemPromptSections> GetAsync(CancellationToken ct = default)
+        {
+            return Task.FromResult(_sections);
+        }
     }
 }
