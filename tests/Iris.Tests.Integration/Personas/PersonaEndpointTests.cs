@@ -402,6 +402,92 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
     }
 
     [Fact]
+    public async Task PutSystemPrompt_OtherUsersPersona_Returns404AndDoesNotModifyPrompt()
+    {
+        // Arrange
+        var otherUserId = Guid.NewGuid();
+        var originalPrompt = new SystemPromptSectionsRequest(
+            Identity: "Other identity",
+            Voice: "Other voice",
+            Role: "Other role",
+            Relationship: "Other relationship",
+            ToolInstructions: "Other tools");
+        var otherPersona = await CreatePersonaForUserAsync(otherUserId, "Other User Persona", originalPrompt);
+
+        // Act
+        var response = await _client.PutAsJsonAsync(
+            $"/api/personas/{otherPersona.Id}/system-prompt",
+            new SystemPromptSectionsRequest(Identity: "Nope"),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        var unchanged = await GetSystemPromptDirectAsync(otherUserId, otherPersona.Id);
+        unchanged.Should().Be(new SystemPromptDto(
+            "Other identity",
+            "Other voice",
+            "Other role",
+            "Other relationship",
+            "Other tools"));
+    }
+
+    [Fact]
+    public async Task PutSystemPromptSection_OtherUsersPersona_Returns404AndDoesNotModifyPrompt()
+    {
+        // Arrange
+        var otherUserId = Guid.NewGuid();
+        var otherPersona = await CreatePersonaForUserAsync(
+            otherUserId,
+            "Other User Persona",
+            new SystemPromptSectionsRequest(Identity: "Other identity", Voice: "Other voice"));
+
+        // Act
+        var response = await _client.PutAsJsonAsync(
+            $"/api/personas/{otherPersona.Id}/system-prompt/sections/voice",
+            new UpdateSystemPromptSectionRequest("Nope"),
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        var unchanged = await GetSystemPromptDirectAsync(otherUserId, otherPersona.Id);
+        unchanged.Should().Be(new SystemPromptDto(
+            "Other identity",
+            "Other voice",
+            null,
+            null,
+            null));
+    }
+
+    [Fact]
+    public async Task DeleteSystemPromptSection_OtherUsersPersona_Returns404AndDoesNotModifyPrompt()
+    {
+        // Arrange
+        var otherUserId = Guid.NewGuid();
+        var otherPersona = await CreatePersonaForUserAsync(
+            otherUserId,
+            "Other User Persona",
+            new SystemPromptSectionsRequest(Identity: "Other identity", Voice: "Other voice"));
+
+        // Act
+        var response = await _client.DeleteAsync(
+            $"/api/personas/{otherPersona.Id}/system-prompt/sections/identity",
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        var unchanged = await GetSystemPromptDirectAsync(otherUserId, otherPersona.Id);
+        unchanged.Should().Be(new SystemPromptDto(
+            "Other identity",
+            "Other voice",
+            null,
+            null,
+            null));
+    }
+
+    [Fact]
     public async Task PutSystemPrompt_UpdatesAllEditableSections()
     {
         // Arrange
@@ -596,14 +682,15 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
 
     private async Task<PersonaDto> CreatePersonaForUserAsync(
         Guid userId,
-        string name)
+        string name,
+        SystemPromptSectionsRequest? systemPrompt = null)
     {
         using var scope = _factory.Services.CreateScope();
         var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
 
         return await personaService.CreateAsync(
             userId,
-            new CreatePersonaRequest(name),
+            new CreatePersonaRequest(name, systemPrompt),
             TestContext.Current.CancellationToken);
     }
 
@@ -614,6 +701,15 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
         userService.OverrideUserId = userId;
         var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
         return await personaService.GetByIdAsync(userId, personaId, TestContext.Current.CancellationToken);
+    }
+
+    private async Task<SystemPromptDto> GetSystemPromptDirectAsync(Guid userId, Guid personaId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+        userService.OverrideUserId = userId;
+        var systemPromptService = scope.ServiceProvider.GetRequiredService<ISystemPromptService>();
+        return await systemPromptService.GetByPersonaIdAsync(userId, personaId, TestContext.Current.CancellationToken);
     }
 
     // ── Unauthenticated coverage ──────────────────────────────────

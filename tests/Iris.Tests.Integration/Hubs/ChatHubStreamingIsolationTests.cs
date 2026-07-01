@@ -102,7 +102,10 @@ public class ChatHubStreamingIsolationTests : IClassFixture<ApiTestFactory>
         await using var connectionA = await CreateHubConnectionAsync(_userA);
         var chunksA = new List<string>();
         connectionA.On<string>("ReceiveChunk", chunk => chunksA.Add(chunk));
-        await connectionA.InvokeAsync("JoinConversation", conversationId);
+        await connectionA.InvokeAsync(
+            "JoinConversation",
+            conversationId,
+            TestContext.Current.CancellationToken);
 
         // User B connects but cannot join user A's conversation
         await using var connectionB = await CreateHubConnectionAsync(_userB);
@@ -112,7 +115,10 @@ public class ChatHubStreamingIsolationTests : IClassFixture<ApiTestFactory>
         // User B tries to join — should be rejected
         try
         {
-            await connectionB.InvokeAsync("JoinConversation", conversationId);
+            await connectionB.InvokeAsync(
+                "JoinConversation",
+                conversationId,
+                TestContext.Current.CancellationToken);
         }
         catch (HubException)
         {
