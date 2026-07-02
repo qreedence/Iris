@@ -20,6 +20,7 @@ public class ConversationTurnWorker : BackgroundService
     private readonly SemaphoreSlim _concurrency;
     private readonly ConcurrentDictionary<Guid, Task> _inFlight = new();
     private int _runningCount;
+    private bool _firstTick = true;
 
     public ConversationTurnWorker(
         ITurnDoorbell doorbell,
@@ -100,11 +101,24 @@ public class ConversationTurnWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var store = scope.ServiceProvider.GetRequiredService<IConversationTurnRequestStore>();
 
+        // FIRST TICK after process start: recover with a ZERO lease, treating every
+        // Processing row as stale. This is safe precisely and ONLY at this moment:
+        // this process has not claimed anything yet (claims run after recovery in the
+        // same loop iteration, and _firstTick is cleared only once a recovery round
+        // completes), and the local registry is empty — so in a single-instance
+        // deployment every Processing row is by definition ownerless. It makes a turn
+        // interrupted by a deploy resume immediately on restart instead of waiting
+        // out the full ClaimLease. Mid-run lease-free recovery would NOT be safe: it
+        // would race the gap between a row being claimed and its CTS being registered
+        // in the registry. Multi-instance would need lease heartbeats instead (see
+        // the comment in EfConversationTurnRequestStore.RecoverOrphansAsync).
+        var lease = _firstTick ? TimeSpan.Zero : _options.ClaimLease;
+
         // Exclude conversations streaming in THIS process so orphan recovery never
         // resets a live long-running stream. Single-instance assumption: any stale
         // Processing row not in this set belongs to a process that is gone.
         var atCap = await store.RecoverOrphansAsync(
-            _options.ClaimLease,
+            lease,
             _options.MaxAttempts,
             _activeTurns.ActiveConversationIds,
             stoppingToken);
@@ -122,6 +136,12 @@ public class ConversationTurnWorker : BackgroundService
             await RecordTurnFailedAsync(scope.ServiceProvider, orphan, stoppingToken);
             await UpdateStatusAsync(s => s.MarkFailedAsync(orphan.Id, "interrupted", CancellationToken.None));
         }
+
+        // Cleared only after a recovery round COMPLETES: if the first round throws,
+        // the next tick retries lease-free, which is still safe because a failed
+        // recovery also skipped the claim step (same try block) — this process still
+        // owns nothing.
+        _firstTick = false;
     }
 
     private async Task ClaimAndDispatchAsync(CancellationToken stoppingToken)

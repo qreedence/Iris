@@ -279,6 +279,111 @@ public class ConversationTurnWorkerTests
         stream.OfType<TurnCompleted>().Should().HaveCount(2);
     }
 
+    // ── Startup orphan recovery ignores the lease ─────────────────
+
+    [Fact]
+    public async Task WorkerStartup_FreshProcessingRow_RecoveredImmediatelyWithoutWaitingOutLease()
+    {
+        // Deploy-mid-stream scenario: the old process died leaving a Processing row
+        // with a RECENT ClaimedAt. A restarted worker must not wait out the full
+        // ClaimLease — its first tick treats every Processing row as ownerless
+        // (registry empty, nothing claimed yet) and recovers it immediately. This
+        // test simulates the restart by starting a SECOND worker instance with a
+        // fresh (empty) registry and doorbell.
+        var marker = $"startup-recovery-{Guid.NewGuid()}";
+        var conversationId = await CreateConversationAsync();
+
+        var messageId = Guid.NewGuid();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+            userService.OverrideUserId = _userId;
+            var recorder = scope.ServiceProvider.GetRequiredService<IConversationEventRecorder>();
+            await recorder.RecordAsync(
+                conversationId,
+                [new MessageSent(messageId, conversationId, marker, Iris.Domain.AiIntegration.ChatRole.User)],
+                TestContext.Current.CancellationToken);
+        }
+
+        var turnId = Guid.NewGuid();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.ConversationTurnRequests.Add(new ConversationTurnRequest
+            {
+                Id = turnId,
+                ConversationId = conversationId,
+                UserId = _userId,
+                MessageId = messageId,
+                Model = "test/model",
+                Status = ConversationTurnStatus.Processing,
+                AttemptCount = 1,
+                CreatedAt = DateTimeOffset.UtcNow.AddSeconds(-10),
+                ClaimedAt = DateTimeOffset.UtcNow, // FRESH — well within the lease
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        // The app's own worker (long past its first tick) respects the lease and will
+        // NOT recover this fresh row — only the restarted worker's first tick can.
+        var restartedWorker = new Iris.Api.Conversations.ConversationTurnWorker(
+            new Iris.Api.Conversations.TurnDoorbell(),
+            new Iris.Api.Conversations.ActiveTurnRegistry(),
+            _factory.Services.GetRequiredService<IServiceScopeFactory>(),
+            Microsoft.Extensions.Options.Options.Create(new Iris.Api.Conversations.TurnProcessingOptions
+            {
+                PollInterval = TimeSpan.FromMilliseconds(100),
+            }),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Iris.Api.Conversations.ConversationTurnWorker>.Instance);
+
+        await restartedWorker.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            // First tick: zero-lease recovery resets the row to Pending; it is then
+            // reclaimed and re-streamed to completion — the turn RESUMES immediately.
+            await WaitUntilAsync(
+                async () => await GetTurnStatusAsync(conversationId) == ConversationTurnStatus.Completed,
+                TimeSpan.FromSeconds(10));
+
+            // Guard the other way: past the first tick, the lease is respected — a
+            // fresh Processing row seeded NOW must NOT be recovered mid-run.
+            var guardRowId = Guid.NewGuid();
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                db.ConversationTurnRequests.Add(new ConversationTurnRequest
+                {
+                    Id = guardRowId,
+                    ConversationId = Guid.NewGuid(),
+                    UserId = _userId,
+                    Model = "test/model",
+                    Status = ConversationTurnStatus.Processing,
+                    AttemptCount = 1,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    ClaimedAt = DateTimeOffset.UtcNow, // fresh — within the lease
+                });
+                await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            }
+
+            // Several 100ms poll ticks elapse; the row must remain untouched.
+            await Task.Delay(500, TestContext.Current.CancellationToken);
+
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var guardRow = await db.ConversationTurnRequests
+                    .AsNoTracking()
+                    .SingleAsync(r => r.Id == guardRowId, TestContext.Current.CancellationToken);
+                guardRow.Status.Should().Be(ConversationTurnStatus.Processing,
+                    "after the first tick the lease is respected; mid-run recovery must not touch a fresh claim");
+            }
+        }
+        finally
+        {
+            await restartedWorker.StopAsync(CancellationToken.None);
+        }
+    }
+
     // ── Cancellation: Pending flavour (4.4) ───────────────────────
 
     [Fact]
