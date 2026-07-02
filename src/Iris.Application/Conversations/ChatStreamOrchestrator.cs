@@ -9,6 +9,8 @@ namespace Iris.Application.Conversations;
 
 public class ChatStreamOrchestrator : IChatStreamOrchestrator
 {
+    private const string PersonaNoLongerExistsMessage = "The persona for this conversation no longer exists.";
+
     private readonly IConversationTurnPreparer _turnPreparer;
     private readonly IChatProvider _chatProvider;
     private readonly IChatStreamNotifier _notifier;
@@ -44,19 +46,12 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
         }
         catch (ConversationPersonaNotFoundException ex)
         {
-            var turnFailed = new TurnFailed(
+            await FailTurnAsync(
                 conversationId,
                 FailureSource.Internal,
                 "persona_not_found",
-                "The persona for this conversation no longer exists.",
-                null);
-
-            await _eventRecorder.RecordAsync(conversationId, [turnFailed], CancellationToken.None);
-            await _notifier.SendErrorAsync(
-                conversationId,
-                "persona_not_found",
-                "The persona for this conversation no longer exists.",
-                CancellationToken.None);
+                PersonaNoLongerExistsMessage,
+                partialContent: null);
 
             _logger.LogWarning(
                 "Persona {PersonaId} for conversation {ConversationId} was not found",
@@ -104,15 +99,8 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
         catch (ChatProviderException ex)
         {
             var (source, errorCode, message) = MapFailure(ex);
-            var turnFailed = new TurnFailed(
-                conversationId,
-                source,
-                errorCode,
-                message,
-                GetPartialContent(content));
 
-            await _eventRecorder.RecordAsync(conversationId, [turnFailed], CancellationToken.None);
-            await _notifier.SendErrorAsync(conversationId, errorCode, message, CancellationToken.None);
+            await FailTurnAsync(conversationId, source, errorCode, message, GetPartialContent(content));
 
             _logger.LogWarning(ex,
                 "Conversation stream failed for {ConversationId} with {ErrorCode}",
@@ -123,20 +111,17 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
         }
         catch (Exception ex)
         {
-            var turnFailed = new TurnFailed(
+            await FailTurnAsync(
                 conversationId,
                 FailureSource.Internal,
                 "internal_error",
                 "An unexpected error occurred.",
                 GetPartialContent(content));
 
-            await _eventRecorder.RecordAsync(conversationId, [turnFailed], CancellationToken.None);
-            await _notifier.SendErrorAsync(conversationId, "internal_error", "An unexpected error occurred.", CancellationToken.None);
             _logger.LogError(ex, "Unexpected error during streaming for {ConversationId}", conversationId);
 
             return;
         }
-
 
         var assistantResponseCompleted = new AssistantResponseCompleted(
             Guid.NewGuid(),
@@ -155,6 +140,22 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
             ct);
 
         await _notifier.SendCompletedAsync(conversationId, ct);
+    }
+
+    private async Task FailTurnAsync(
+        Guid conversationId,
+        FailureSource source,
+        string errorCode,
+        string message,
+        string? partialContent)
+    {
+        var turnFailed = new TurnFailed(conversationId, source, errorCode, message, partialContent);
+
+        // CancellationToken.None is deliberate: these are cleanup writes that must
+        // survive a cancelled outer token so the conversation isn't left without a
+        // terminal event and the client isn't left without an error notification.
+        await _eventRecorder.RecordAsync(conversationId, [turnFailed], CancellationToken.None);
+        await _notifier.SendErrorAsync(conversationId, errorCode, message, CancellationToken.None);
     }
 
     private static (FailureSource Source, string ErrorCode, string Message) MapFailure(ChatProviderException ex)
