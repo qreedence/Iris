@@ -413,15 +413,8 @@ public class ConversationTurnWorkerTests
 
     // ── Stream helpers ────────────────────────────────────────────
 
-    private static async IAsyncEnumerable<StreamedChunk> DefaultStream(
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        ct.ThrowIfCancellationRequested();
-        yield return new StreamedChunk("ok", false, null);
-        await Task.Yield();
-        ct.ThrowIfCancellationRequested();
-        yield return new StreamedChunk(null, true, new UsageInfo(1, 1, 2));
-    }
+    private static IAsyncEnumerable<StreamedChunk> DefaultStream(CancellationToken ct) =>
+        ChatProviderMock.DefaultStream(ct);
 
     private static async IAsyncEnumerable<StreamedChunk> GatedStream(
         TaskCompletionSource started,

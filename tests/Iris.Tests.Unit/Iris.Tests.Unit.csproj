@@ -27,6 +27,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Iris.Api\Iris.Api.csproj" />
     <ProjectReference Include="..\..\src\Iris.Infrastructure\Iris.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Iris.Application\Iris.Application.csproj" />
   </ItemGroup>

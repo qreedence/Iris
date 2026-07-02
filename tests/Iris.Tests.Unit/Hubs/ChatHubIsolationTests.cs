@@ -6,7 +6,7 @@ using Iris.Application.Conversations.Queries;
 using Microsoft.AspNetCore.SignalR;
 using NSubstitute;
 
-namespace Iris.Tests.Integration.Hubs;
+namespace Iris.Tests.Unit.Hubs;
 
 public class ChatHubIsolationTests
 {

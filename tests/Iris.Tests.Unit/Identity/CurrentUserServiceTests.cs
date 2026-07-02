@@ -6,7 +6,7 @@ using Iris.Application.Exceptions;
 using Microsoft.AspNetCore.Http;
 using NSubstitute;
 
-namespace Iris.Tests.Integration.Identity;
+namespace Iris.Tests.Unit.Identity;
 
 public class CurrentUserServiceTests
 {
