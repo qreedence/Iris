@@ -8,6 +8,12 @@ using Microsoft.Extensions.Logging;
 
 namespace Iris.Infrastructure.Personas;
 
+/// <summary>
+/// Tenant scoping for reads/updates/deletes comes from the EF global query filter
+/// on <see cref="Persona"/> (keyed on ICurrentUserService, see AppDbContext.OnModelCreating) —
+/// these methods intentionally take no userId. CreateAsync keeps userId because it
+/// assigns ownership.
+/// </summary>
 public class PersonaService : IPersonaService
 {
     private static readonly Expression<Func<Persona, PersonaDto>> ProjectToDto = p =>
@@ -40,17 +46,12 @@ public class PersonaService : IPersonaService
         _logger = logger;
     }
 
-    public async Task<PersonaDto> GetByIdAsync(Guid userId, Guid id, CancellationToken ct = default)
+    public async Task<PersonaDto> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
         return await FindPersonaAsync(id, ct);
     }
 
-    public async Task<PersonaDto> GetForConversationAsync(Guid id, CancellationToken ct = default)
-    {
-        return await FindPersonaAsync(id, ct);
-    }
-
-    public async Task<IReadOnlyList<PersonaDto>> GetAllByUserIdAsync(Guid userId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<PersonaDto>> GetAllAsync(CancellationToken ct = default)
     {
         return await _db.Personas
             .AsNoTracking()
@@ -90,13 +91,13 @@ public class PersonaService : IPersonaService
         return ToDto(persona);
     }
 
-    public async Task<PersonaDto> UpdateAsync(Guid userId, Guid id, UpdatePersonaRequest request, CancellationToken ct = default)
+    public async Task<PersonaDto> UpdateAsync(Guid id, UpdatePersonaRequest request, CancellationToken ct = default)
     {
         ValidateName(request.Name);
 
         var persona = await _db.Personas
             .Include(p => p.SystemPrompt)
-            .FirstOrDefaultAsync(p => p.UserId == userId && p.Id == id, ct);
+            .FirstOrDefaultAsync(p => p.Id == id, ct);
 
         if (persona is null)
             throw new NotFoundException("Persona not found.");
@@ -118,11 +119,11 @@ public class PersonaService : IPersonaService
         return ToDto(persona);
     }
 
-    public async Task DeleteAsync(Guid userId, Guid id, CancellationToken ct = default)
+    public async Task DeleteAsync(Guid id, CancellationToken ct = default)
     {
         var persona = await _db.Personas
             .Include(p => p.SystemPrompt)
-            .FirstOrDefaultAsync(p => p.UserId == userId && p.Id == id, ct);
+            .FirstOrDefaultAsync(p => p.Id == id, ct);
 
         if (persona is null)
             throw new NotFoundException("Persona not found.");

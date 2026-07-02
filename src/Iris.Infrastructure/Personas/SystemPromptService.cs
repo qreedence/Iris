@@ -7,6 +7,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Iris.Infrastructure.Personas;
 
+/// <summary>
+/// Tenant scoping comes from the EF global query filter on Persona/SystemPrompt
+/// (keyed on ICurrentUserService, see AppDbContext.OnModelCreating) — these methods
+/// intentionally take no userId.
+/// </summary>
 public class SystemPromptService : ISystemPromptService
 {
     private readonly AppDbContext _db;
@@ -19,23 +24,21 @@ public class SystemPromptService : ISystemPromptService
     }
 
     public async Task<SystemPromptDto> GetByPersonaIdAsync(
-        Guid userId,
         Guid personaId,
         CancellationToken ct = default)
     {
-        var systemPrompt = await LoadSystemPromptAsync(userId, personaId, ct);
+        var systemPrompt = await LoadSystemPromptAsync(personaId, ct);
         return ToDto(systemPrompt);
     }
 
     public async Task<SystemPromptDto> UpdateAsync(
-        Guid userId,
         Guid personaId,
         SystemPromptSectionsRequest request,
         CancellationToken ct = default)
     {
         SystemPromptRequestValidator.EnsureOnlyEditableSections(request);
 
-        var systemPrompt = await LoadSystemPromptAsync(userId, personaId, ct);
+        var systemPrompt = await LoadSystemPromptAsync(personaId, ct);
 
         systemPrompt.Identity = SystemPromptSectionContent.Normalize(request.Identity);
         systemPrompt.Voice = SystemPromptSectionContent.Normalize(request.Voice);
@@ -47,21 +50,19 @@ public class SystemPromptService : ISystemPromptService
         await _db.SaveChangesAsync(ct);
 
         _logger.LogInformation(
-            "Updated system prompt for persona {PersonaId} and user {UserId}",
-            personaId,
-            userId);
+            "Updated system prompt for persona {PersonaId}",
+            personaId);
 
         return ToDto(systemPrompt);
     }
 
     public async Task<SystemPromptDto> UpdateSectionAsync(
-        Guid userId,
         Guid personaId,
         SystemPromptSection section,
         string? content,
         CancellationToken ct = default)
     {
-        var systemPrompt = await LoadSystemPromptAsync(userId, personaId, ct);
+        var systemPrompt = await LoadSystemPromptAsync(personaId, ct);
         var normalizedContent = SystemPromptSectionContent.Normalize(content);
 
         switch (section)
@@ -89,28 +90,26 @@ public class SystemPromptService : ISystemPromptService
         await _db.SaveChangesAsync(ct);
 
         _logger.LogInformation(
-            "Updated {Section} system prompt section for persona {PersonaId} and user {UserId}",
+            "Updated {Section} system prompt section for persona {PersonaId}",
             section,
-            personaId,
-            userId);
+            personaId);
 
         return ToDto(systemPrompt);
     }
 
     public Task<SystemPromptDto> ClearSectionAsync(
-        Guid userId,
         Guid personaId,
         SystemPromptSection section,
         CancellationToken ct = default)
     {
-        return UpdateSectionAsync(userId, personaId, section, content: null, ct);
+        return UpdateSectionAsync(personaId, section, content: null, ct);
     }
 
-    private async Task<SystemPrompt> LoadSystemPromptAsync(Guid userId, Guid personaId, CancellationToken ct)
+    private async Task<SystemPrompt> LoadSystemPromptAsync(Guid personaId, CancellationToken ct)
     {
         var persona = await _db.Personas
             .Include(p => p.SystemPrompt)
-            .FirstOrDefaultAsync(p => p.UserId == userId && p.Id == personaId, ct);
+            .FirstOrDefaultAsync(p => p.Id == personaId, ct);
 
         if (persona is null)
             throw new NotFoundException("Persona not found.");

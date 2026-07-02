@@ -39,7 +39,7 @@ namespace Iris.Application.Conversations.Commands.CreateConversation
             if (existingEvents.Count > 0)
                 throw new ValidationException("Conversation already exists.");
 
-            await _personaService.GetByIdAsync(command.UserId, command.PersonaId, ct);
+            await _personaService.GetByIdAsync(command.PersonaId, ct);
 
             var conversation = new ConversationCreated(
                 command.ConversationId,

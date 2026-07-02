@@ -34,6 +34,9 @@ namespace Iris.Infrastructure.Persistence
 
         public async Task<IReadOnlyList<ConversationMessageDto>?> GetMessagesAsync(Guid conversationId, int skip = 0, int take = 100, CancellationToken ct = default)
         {
+            // LOAD-BEARING for tenant isolation: ConversationMessages has no EF query
+            // filter, so this pre-check is the only thing stopping one user from
+            // reading another user's messages below. Do not remove or reorder.
             var exists = await ExistsForUserAsync(conversationId, ct);
 
             if (!exists)
@@ -56,6 +59,12 @@ namespace Iris.Infrastructure.Persistence
             return messages;
         }
 
+        /// <summary>
+        /// Scoping comes from the ConversationReadModel EF global query filter
+        /// (keyed on ICurrentUserService, see AppDbContext.OnModelCreating) — the
+        /// name describes semantics ("for the current user"), the filter provides
+        /// the mechanism.
+        /// </summary>
         public async Task<bool> ExistsForUserAsync(Guid conversationId, CancellationToken ct = default)
         {
             return await _db.ConversationReadModels

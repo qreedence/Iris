@@ -39,8 +39,7 @@ public class PersonasController : ControllerBase
     public async Task<IActionResult> GetAll(
         CancellationToken ct = default)
     {
-        var userId = User.GetUserId();
-        var personas = await _personaService.GetAllByUserIdAsync(userId, ct);
+        var personas = await _personaService.GetAllAsync(ct);
         return Ok(personas);
     }
 
@@ -51,8 +50,7 @@ public class PersonasController : ControllerBase
         Guid id,
         CancellationToken ct = default)
     {
-        var userId = User.GetUserId();
-        var persona = await _personaService.GetByIdAsync(userId, id, ct);
+        var persona = await _personaService.GetByIdAsync(id, ct);
         return Ok(persona);
     }
 
@@ -65,8 +63,7 @@ public class PersonasController : ControllerBase
         [FromBody] UpdatePersonaRequest request,
         CancellationToken ct = default)
     {
-        var userId = User.GetUserId();
-        var persona = await _personaService.UpdateAsync(userId, id, request, ct);
+        var persona = await _personaService.UpdateAsync(id, request, ct);
         return Ok(persona);
     }
 
@@ -77,8 +74,7 @@ public class PersonasController : ControllerBase
         Guid id,
         CancellationToken ct = default)
     {
-        var userId = User.GetUserId();
-        var systemPrompt = await _systemPromptService.GetByPersonaIdAsync(userId, id, ct);
+        var systemPrompt = await _systemPromptService.GetByPersonaIdAsync(id, ct);
         return Ok(systemPrompt);
     }
 
@@ -91,8 +87,7 @@ public class PersonasController : ControllerBase
         [FromBody] SystemPromptSectionsRequest request,
         CancellationToken ct = default)
     {
-        var userId = User.GetUserId();
-        var systemPrompt = await _systemPromptService.UpdateAsync(userId, id, request, ct);
+        var systemPrompt = await _systemPromptService.UpdateAsync(id, request, ct);
         return Ok(systemPrompt);
     }
 
@@ -109,9 +104,7 @@ public class PersonasController : ControllerBase
         if (!SystemPromptSectionParser.TryParse(section, out var parsedSection))
             throw new ValidationException("Invalid system prompt section.");
 
-        var userId = User.GetUserId();
         var systemPrompt = await _systemPromptService.UpdateSectionAsync(
-            userId,
             id,
             parsedSection,
             request.Content,
@@ -132,9 +125,7 @@ public class PersonasController : ControllerBase
         if (!SystemPromptSectionParser.TryParse(section, out var parsedSection))
             throw new ValidationException("Invalid system prompt section.");
 
-        var userId = User.GetUserId();
         var systemPrompt = await _systemPromptService.ClearSectionAsync(
-            userId,
             id,
             parsedSection,
             ct);
@@ -149,8 +140,7 @@ public class PersonasController : ControllerBase
         Guid id,
         CancellationToken ct = default)
     {
-        var userId = User.GetUserId();
-        await _personaService.DeleteAsync(userId, id, ct);
+        await _personaService.DeleteAsync(id, ct);
         return NoContent();
     }
 }

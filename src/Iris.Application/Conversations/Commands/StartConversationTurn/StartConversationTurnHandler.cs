@@ -1,5 +1,5 @@
+using Iris.Application.Conversations.Queries;
 using Iris.Application.Exceptions;
-using Iris.Application.Identity.Interfaces;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
 using MediatR;
@@ -8,16 +8,16 @@ namespace Iris.Application.Conversations.Commands.StartConversationTurn;
 
 public class StartConversationTurnHandler : IRequestHandler<StartConversationTurnCommand, Unit>
 {
-    private readonly IEventStore _eventStore;
+    private readonly IConversationQueries _conversationQueries;
     private readonly IConversationEventRecorder _eventRecorder;
     private readonly IConversationTurnQueue _turnQueue;
 
     public StartConversationTurnHandler(
-        IEventStore eventStore,
+        IConversationQueries conversationQueries,
         IConversationEventRecorder eventRecorder,
         IConversationTurnQueue turnQueue)
     {
-        _eventStore = eventStore;
+        _conversationQueries = conversationQueries;
         _eventRecorder = eventRecorder;
         _turnQueue = turnQueue;
     }
@@ -33,10 +33,11 @@ public class StartConversationTurnHandler : IRequestHandler<StartConversationTur
         if (string.IsNullOrWhiteSpace(command.Model))
             throw new ValidationException("Model can not be empty.");
 
-        var events = await _eventStore.LoadStreamAsync(command.ConversationId, ct);
-
-        var created = events.OfType<ConversationCreated>().FirstOrDefault();
-        if (created is null || created.UserId != command.UserId)
+        // Ownership check via the read model rather than a full event-stream load:
+        // the read model is projected synchronously in-process, so there is no lag,
+        // and this saves a full stream load + deserialization on every message.
+        var exists = await _conversationQueries.ExistsForUserAsync(command.ConversationId, ct);
+        if (!exists)
             throw new NotFoundException("Conversation does not exist.");
 
         var message = new MessageSent(

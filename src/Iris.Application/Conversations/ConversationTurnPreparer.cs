@@ -41,7 +41,7 @@ public class ConversationTurnPreparer : IConversationTurnPreparer
         PersonaDto persona;
         try
         {
-            persona = await _personaService.GetForConversationAsync(conversationCreated.PersonaId, ct);
+            persona = await _personaService.GetByIdAsync(conversationCreated.PersonaId, ct);
         }
         catch (NotFoundException)
         {
