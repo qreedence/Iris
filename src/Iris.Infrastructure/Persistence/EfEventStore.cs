@@ -27,6 +27,10 @@ public class EfEventStore : IEventStore
 
         foreach (var evt in events)
         {
+            if (!ConversationEventTypes.ByName.ContainsKey(evt.GetType().Name))
+                throw new InvalidOperationException(
+                    $"Unknown conversation event type '{evt.GetType().Name}'.");
+
             var storedEvent = new StoredEvent
             {
                 AggregateId = aggregateId,
@@ -64,7 +68,7 @@ public class EfEventStore : IEventStore
 
         foreach (var stored in storedEvents)
         {
-            if (!EventTypeMap.TryGetValue(stored.EventType, out var type))
+            if (!ConversationEventTypes.ByName.TryGetValue(stored.EventType, out var type))
                 throw new InvalidOperationException(
                     $"Unknown event type '{stored.EventType}' (sequence {stored.SequenceNumber}, aggregate {stored.AggregateId})");
 
@@ -82,17 +86,5 @@ public class EfEventStore : IEventStore
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         Converters = { new JsonStringEnumConverter() },
-    };
-
-    private static readonly Dictionary<string, Type> EventTypeMap = new()
-    {
-        ["ConversationCreated"] = typeof(ConversationCreated),
-        ["MessageSent"] = typeof(MessageSent),
-        ["AssistantResponseCompleted"] = typeof(AssistantResponseCompleted),
-        ["TurnCompleted"] = typeof(TurnCompleted),
-        ["TurnFailed"] = typeof(TurnFailed),
-        ["TurnCancelled"] = typeof(TurnCancelled),
-        ["ModelChanged"] = typeof(ModelChanged),
-        ["ConversationArchived"] = typeof(ConversationArchived),
     };
 }

@@ -95,27 +95,75 @@ public class ConversationEventRecorderTests
         await _publisher.Received(1).Publish(Arg.Any<EventNotification<ConversationArchived>>(), CancellationToken.None);
     }
 
-    [Fact]
-    public async Task RecordAsync_UnknownEventType_ThrowsAndDoesNotAppend()
+    public static IEnumerable<object[]> RegisteredEventTypes =>
+        ConversationEventTypes.ByName.Values.Select(type => new object[] { type });
+
+    [Theory]
+    [MemberData(nameof(RegisteredEventTypes))]
+    public async Task RecordAsync_ForEveryRegisteredEventType_PublishesExactlyOneMatchingNotification(Type eventType)
     {
         // Arrange
         var aggregateId = Guid.NewGuid();
+        var occurredAt = DateTimeOffset.UtcNow;
+        var evt = CreateSampleEvent(eventType, aggregateId);
+
+        _eventStore.AppendAsync(
+                Arg.Any<Guid>(),
+                Arg.Any<IEnumerable<ConversationEvent>>(),
+                Arg.Any<Guid>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var storedAggregateId = call.ArgAt<Guid>(0);
+                var storedEvents = call.ArgAt<IEnumerable<ConversationEvent>>(1).ToList();
+                var commandId = call.ArgAt<Guid>(2);
+
+                return Task.FromResult<IReadOnlyList<RecordedEvent>>(
+                    storedEvents
+                        .Select((e, index) => new RecordedEvent(
+                            e,
+                            index + 1,
+                            storedAggregateId,
+                            commandId,
+                            occurredAt))
+                        .ToList());
+            });
+
         var sut = new ConversationEventRecorder(_eventStore, _publisher);
-        var unknownEvent = new UnknownConversationEvent(aggregateId);
 
         // Act
-        var act = () => sut.RecordAsync(aggregateId, [unknownEvent], CancellationToken.None);
+        var recorded = await sut.RecordAsync(aggregateId, [evt], CancellationToken.None);
 
         // Assert
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*UnknownConversationEvent*");
+        recorded.Should().ContainSingle().Which.Event.Should().Be(evt);
 
-        await _eventStore.DidNotReceive().AppendAsync(
-            Arg.Any<Guid>(),
-            Arg.Any<IEnumerable<ConversationEvent>>(),
-            Arg.Any<Guid>(),
-            Arg.Any<CancellationToken>());
+        var notificationType = typeof(EventNotification<>).MakeGenericType(eventType);
+        var publishedNotifications = _publisher.ReceivedCalls()
+            .Where(call => call.GetMethodInfo().Name == nameof(IPublisher.Publish))
+            .Select(call => call.GetArguments()[0])
+            .Where(arg => arg is not null)
+            .ToList();
+
+        publishedNotifications.Should().ContainSingle(n => n!.GetType() == notificationType);
     }
 
-    private record UnknownConversationEvent(Guid ConversationId) : ConversationEvent(ConversationId);
+    private static ConversationEvent CreateSampleEvent(Type eventType, Guid aggregateId)
+    {
+        object result = eventType.Name switch
+        {
+            nameof(ConversationCreated) => new ConversationCreated(aggregateId, Guid.NewGuid(), Guid.NewGuid(), "Chat"),
+            nameof(MessageSent) => new MessageSent(Guid.NewGuid(), aggregateId, "Hello", ChatRole.User),
+            nameof(AssistantResponseCompleted) => new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, "Hi", "test/model"),
+            nameof(TurnCompleted) => new TurnCompleted(aggregateId, 10, 5),
+            nameof(TurnFailed) => new TurnFailed(aggregateId, FailureSource.Provider, "provider_error", "Provider failed.", "partial"),
+            nameof(TurnCancelled) => new TurnCancelled(aggregateId, "partial"),
+            nameof(ModelChanged) => new ModelChanged(aggregateId, "new/model"),
+            nameof(ConversationArchived) => new ConversationArchived(aggregateId),
+            _ => throw new NotSupportedException(
+                $"No sample event constructor registered in this test for '{eventType.Name}'. " +
+                "Add one alongside the new entry in ConversationEventTypes.ByName."),
+        };
+
+        return (ConversationEvent)result;
+    }
 }

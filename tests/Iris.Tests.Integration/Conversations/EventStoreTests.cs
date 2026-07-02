@@ -313,4 +313,32 @@ public class EventStoreTests : IClassFixture<IntegrationTestFactory>
                 $"event {i} should follow event {i - 1} with no gap");
         }
     }
+
+    // --- §7: Unregistered Event Guard ---
+
+    [Fact]
+    public async Task AppendAsync_UnregisteredEventType_ThrowsAndDoesNotPersist()
+    {
+        // Arrange
+        await using var db = _factory.CreateDbContext();
+        var sut = CreateSut(db);
+        var aggregateId = Guid.NewGuid();
+        var unknownEvent = new UnknownConversationEvent(aggregateId);
+
+        // Act
+        var act = () => sut.AppendAsync(aggregateId, [unknownEvent], Guid.NewGuid(), TestContext.Current.CancellationToken);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*UnknownConversationEvent*");
+
+        await using var verifyDb = _factory.CreateDbContext();
+        var stored = await verifyDb.StoredEvents
+            .Where(e => e.AggregateId == aggregateId)
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        stored.Should().BeEmpty();
+    }
+
+    private record UnknownConversationEvent(Guid ConversationId) : ConversationEvent(ConversationId);
 }
