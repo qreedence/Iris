@@ -271,12 +271,62 @@ public class EventStoreTests
 
         var cancelled = stream[5].Should().BeOfType<TurnCancelled>().Subject;
         cancelled.PartialContent.Should().Be("cancelled partial");
+        cancelled.MessageId.Should().BeNull("this round-trip omitted the optional MessageId");
 
         var modelChanged = stream[6].Should().BeOfType<ModelChanged>().Subject;
         modelChanged.Model.Should().Be("openai/gpt-4.1");
 
         var archived = stream[7].Should().BeOfType<ConversationArchived>().Subject;
         archived.ConversationId.Should().Be(aggregateId);
+    }
+
+    [Fact]
+    public async Task LoadStreamAsync_LegacyTurnCancelledWithoutMessageId_DeserializesWithNullMessageId()
+    {
+        // Back-compat: TurnCancelled events stored before the MessageId field existed
+        // have NO messageId property in their JSON and must deserialize to null.
+        await using var db = _factory.CreateDbContext();
+        var aggregateId = Guid.NewGuid();
+
+        db.StoredEvents.Add(new Iris.Domain.Conversations.StoredEvent
+        {
+            AggregateId = aggregateId,
+            CommandId = Guid.NewGuid(),
+            EventType = nameof(TurnCancelled),
+            // Legacy payload: only the two original properties, no messageId.
+            EventData = $$"""{"ConversationId":"{{aggregateId}}","PartialContent":"legacy partial"}""",
+            OccurredAt = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await using var readDb = _factory.CreateDbContext();
+        var stream = await CreateSut(readDb).LoadStreamAsync(aggregateId, TestContext.Current.CancellationToken);
+
+        var cancelled = stream.Should().ContainSingle().Subject.Should().BeOfType<TurnCancelled>().Subject;
+        cancelled.PartialContent.Should().Be("legacy partial");
+        cancelled.MessageId.Should().BeNull("legacy events have no messageId property");
+    }
+
+    [Fact]
+    public async Task AppendAsync_TurnCancelledWithMessageId_RoundTripsMessageId()
+    {
+        await using var db = _factory.CreateDbContext();
+        var sut = CreateSut(db);
+        var aggregateId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+
+        await sut.AppendAsync(
+            aggregateId,
+            [new TurnCancelled(aggregateId, "partial", messageId)],
+            Guid.NewGuid(),
+            TestContext.Current.CancellationToken);
+
+        await using var readDb = _factory.CreateDbContext();
+        var stream = await CreateSut(readDb).LoadStreamAsync(aggregateId, TestContext.Current.CancellationToken);
+
+        var cancelled = stream.Should().ContainSingle().Subject.Should().BeOfType<TurnCancelled>().Subject;
+        cancelled.PartialContent.Should().Be("partial");
+        cancelled.MessageId.Should().Be(messageId);
     }
 
     // --- §6: Multi-Append Continuity ---

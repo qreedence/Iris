@@ -7,6 +7,7 @@ public interface IConversationTurnPreparer
     Task<PreparedConversationTurn> PrepareAsync(
         Guid userId,
         Guid conversationId,
+        Guid messageId,
         string requestedModel,
         bool changeModel,
         ModelParameters? modelParameters,

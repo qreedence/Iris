@@ -5,6 +5,7 @@ using Iris.Application.Exceptions;
 using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 
 namespace Iris.Tests.Unit.Conversations;
@@ -22,7 +23,11 @@ public class ConversationTurnPreparerTests
             .BuildAsync(Arg.Any<SystemPromptDto>(), Arg.Any<CancellationToken>())
             .Returns(call => call.Arg<SystemPromptDto>().Identity);
 
-        return new ConversationTurnPreparer(_eventStore, _personaService, _systemPromptAssembler);
+        return new ConversationTurnPreparer(
+            _eventStore,
+            _personaService,
+            _systemPromptAssembler,
+            NullLogger<ConversationTurnPreparer>.Instance);
     }
 
     [Fact]
@@ -50,6 +55,7 @@ public class ConversationTurnPreparerTests
         var prepared = await sut.PrepareAsync(
             _userId,
             conversationId,
+            Guid.NewGuid(),
             "fallback/model",
             changeModel: false,
             modelParameters,
@@ -91,6 +97,7 @@ public class ConversationTurnPreparerTests
         var prepared = await sut.PrepareAsync(
             _userId,
             conversationId,
+            Guid.NewGuid(),
             "fallback/model",
             changeModel: false,
             modelParameters: null,
@@ -114,6 +121,7 @@ public class ConversationTurnPreparerTests
         var prepared = await sut.PrepareAsync(
             _userId,
             conversationId,
+            Guid.NewGuid(),
             "persona/model",
             changeModel: false,
             modelParameters: null,
@@ -138,6 +146,7 @@ public class ConversationTurnPreparerTests
         var prepared = await sut.PrepareAsync(
             _userId,
             conversationId,
+            Guid.NewGuid(),
             "frontend/fallback",
             changeModel: false,
             modelParameters: null,
@@ -162,6 +171,7 @@ public class ConversationTurnPreparerTests
         var prepared = await sut.PrepareAsync(
             _userId,
             conversationId,
+            Guid.NewGuid(),
             "fallback/model",
             changeModel: false,
             modelParameters: null,
@@ -186,6 +196,7 @@ public class ConversationTurnPreparerTests
         var prepared = await sut.PrepareAsync(
             _userId,
             conversationId,
+            Guid.NewGuid(),
             "new/model",
             changeModel: true,
             modelParameters: null,
@@ -216,6 +227,7 @@ public class ConversationTurnPreparerTests
         var prepared = await sut.PrepareAsync(
             _userId,
             conversationId,
+            Guid.NewGuid(),
             "changed/model",
             changeModel: false,
             modelParameters: null,
@@ -245,6 +257,7 @@ public class ConversationTurnPreparerTests
         var prepared = await sut.PrepareAsync(
             _userId,
             conversationId,
+            Guid.NewGuid(),
             "newer/model",
             changeModel: true,
             modelParameters: null,
@@ -271,6 +284,7 @@ public class ConversationTurnPreparerTests
         var act = () => sut.PrepareAsync(
             _userId,
             conversationId,
+            Guid.NewGuid(),
             "fallback/model",
             changeModel: false,
             modelParameters: null,
@@ -295,6 +309,7 @@ public class ConversationTurnPreparerTests
         var act = () => sut.PrepareAsync(
             _userId,
             conversationId,
+            Guid.NewGuid(),
             "fallback/model",
             changeModel: false,
             modelParameters: null,
@@ -333,6 +348,7 @@ public class ConversationTurnPreparerTests
         var act = () => sut.PrepareAsync(
             attackerId,
             conversationId,
+            Guid.NewGuid(),
             "fallback/model",
             changeModel: false,
             modelParameters: null,
@@ -340,6 +356,45 @@ public class ConversationTurnPreparerTests
 
         // Assert
         await act.Should().ThrowAsync<NotFoundException>();
+    }
+
+    [Fact]
+    public async Task PrepareAsync_TruncatesStreamAtItsOwnMessage_IgnoringLaterEvents()
+    {
+        // Two turns queued back to back: MsgA then MsgB, with a ModelChanged AFTER
+        // MsgA. Preparing for turn A must reflect the conversation AS OF MsgA — its
+        // history ends at MsgA (MsgB excluded) and the later ModelChanged is ignored
+        // for model resolution.
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
+        var messageAId = Guid.NewGuid();
+
+        _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
+            .Returns([
+                new ConversationCreated(conversationId, _userId, personaId, "Chat"),
+                new MessageSent(messageAId, conversationId, "Message A", ChatRole.User),
+                new ModelChanged(conversationId, "later/model"),
+                new MessageSent(Guid.NewGuid(), conversationId, "Message B", ChatRole.User),
+            ]);
+        SetupPersona(personaId, modelPreference: "persona/model");
+
+        var prepared = await sut.PrepareAsync(
+            _userId,
+            conversationId,
+            messageAId,
+            "fallback/model",
+            changeModel: false,
+            modelParameters: null,
+            TestContext.Current.CancellationToken);
+
+        // History ends at Message A — Message B (queued after) is not included.
+        prepared.ChatRequest.Messages.Should().Equal([
+            new ChatMessage(ChatRole.User, "Message A"),
+        ]);
+
+        // The ModelChanged after Message A is ignored; model falls to persona pref.
+        prepared.ChatRequest.Model.Should().Be("persona/model");
     }
 
     private void SetupPersona(

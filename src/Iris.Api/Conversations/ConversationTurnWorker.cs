@@ -218,6 +218,7 @@ public class ConversationTurnWorker : BackgroundService
             await orchestrator.StreamAsync(
                 request.UserId,
                 request.ConversationId,
+                request.MessageId,
                 request.Model,
                 request.ChangeModel,
                 Deserialize(request.ModelParameters),
@@ -383,8 +384,20 @@ public class ConversationTurnWorker : BackgroundService
 
         for (var i = messageIndex + 1; i < stream.Count; i++)
         {
-            if (stream[i] is TurnCompleted or TurnFailed or TurnCancelled)
-                return true;
+            switch (stream[i])
+            {
+                case TurnCompleted:
+                case TurnFailed:
+                    return true;
+                case TurnCancelled cancelled:
+                    // A TurnCancelled whose MessageId identifies a DIFFERENT turn
+                    // (a later pending turn cancelled while this one sat crashed)
+                    // must not make this earlier turn look terminal. Legacy events
+                    // (null MessageId) keep positional semantics.
+                    if (cancelled.MessageId is null || cancelled.MessageId == request.MessageId)
+                        return true;
+                    break;
+            }
         }
 
         return false;

@@ -37,6 +37,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
     public async Task StreamAsync(
         Guid userId,
         Guid conversationId,
+        Guid messageId,
         string model,
         bool changeModel,
         ModelParameters? modelParameters,
@@ -45,7 +46,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
         PreparedConversationTurn preparedTurn;
         try
         {
-            preparedTurn = await _turnPreparer.PrepareAsync(userId, conversationId, model, changeModel, modelParameters, ct);
+            preparedTurn = await _turnPreparer.PrepareAsync(userId, conversationId, messageId, model, changeModel, modelParameters, ct);
         }
         catch (ConversationPersonaNotFoundException ex)
         {
@@ -103,7 +104,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
                 throw;
             }
 
-            var turnCancelled = new TurnCancelled(conversationId, GetPartialContent(content));
+            var turnCancelled = new TurnCancelled(conversationId, GetPartialContent(content), messageId);
 
             await _eventRecorder.RecordAsync(
                 conversationId,
