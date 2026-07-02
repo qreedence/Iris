@@ -18,11 +18,11 @@ public class SystemPromptAssembler : ISystemPromptAssembler
 
         AppendSection(builder, "app_context", globalSections.AppContext);
         AppendSection(builder, "guidelines", globalSections.Guidelines);
-        AppendSection(builder, "identity", systemPrompt.Identity);
-        AppendSection(builder, "voice", systemPrompt.Voice);
-        AppendSection(builder, "role", systemPrompt.Role);
-        AppendSection(builder, "relationship", systemPrompt.Relationship);
-        AppendSection(builder, "tool_instructions", systemPrompt.ToolInstructions);
+
+        foreach (var definition in SystemPromptSections.All)
+        {
+            AppendSection(builder, definition.TagName, definition.GetFromDto(systemPrompt));
+        }
 
         return builder.Length == 0 ? null : builder.ToString();
     }

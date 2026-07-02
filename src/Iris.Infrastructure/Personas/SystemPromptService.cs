@@ -40,11 +40,11 @@ public class SystemPromptService : ISystemPromptService
 
         var systemPrompt = await LoadSystemPromptAsync(personaId, ct);
 
-        systemPrompt.Identity = SystemPromptSectionContent.Normalize(request.Identity);
-        systemPrompt.Voice = SystemPromptSectionContent.Normalize(request.Voice);
-        systemPrompt.Role = SystemPromptSectionContent.Normalize(request.Role);
-        systemPrompt.Relationship = SystemPromptSectionContent.Normalize(request.Relationship);
-        systemPrompt.ToolInstructions = SystemPromptSectionContent.Normalize(request.ToolInstructions);
+        foreach (var definition in SystemPromptSections.All)
+        {
+            definition.SetOnEntity(systemPrompt, SystemPromptSectionContent.Normalize(definition.GetFromRequest(request)));
+        }
+
         systemPrompt.UpdatedAt = DateTimeOffset.UtcNow;
 
         await _db.SaveChangesAsync(ct);
@@ -65,26 +65,10 @@ public class SystemPromptService : ISystemPromptService
         var systemPrompt = await LoadSystemPromptAsync(personaId, ct);
         var normalizedContent = SystemPromptSectionContent.Normalize(content);
 
-        switch (section)
-        {
-            case SystemPromptSection.Identity:
-                systemPrompt.Identity = normalizedContent;
-                break;
-            case SystemPromptSection.Voice:
-                systemPrompt.Voice = normalizedContent;
-                break;
-            case SystemPromptSection.Role:
-                systemPrompt.Role = normalizedContent;
-                break;
-            case SystemPromptSection.Relationship:
-                systemPrompt.Relationship = normalizedContent;
-                break;
-            case SystemPromptSection.ToolInstructions:
-                systemPrompt.ToolInstructions = normalizedContent;
-                break;
-            default:
-                throw new ValidationException("Invalid system prompt section.");
-        }
+        var definition = SystemPromptSections.All.SingleOrDefault(d => d.Section == section)
+            ?? throw new ValidationException("Invalid system prompt section.");
+
+        definition.SetOnEntity(systemPrompt, normalizedContent);
 
         systemPrompt.UpdatedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);

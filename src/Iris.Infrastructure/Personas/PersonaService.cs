@@ -164,15 +164,20 @@ public class PersonaService : IPersonaService
 
     private static SystemPrompt CreateSystemPrompt(SystemPromptSectionsRequest? request, DateTimeOffset now)
     {
-        return new SystemPrompt
+        var systemPrompt = new SystemPrompt
         {
-            Identity = SystemPromptSectionContent.Normalize(request?.Identity),
-            Voice = SystemPromptSectionContent.Normalize(request?.Voice),
-            Role = SystemPromptSectionContent.Normalize(request?.Role),
-            Relationship = SystemPromptSectionContent.Normalize(request?.Relationship),
-            ToolInstructions = SystemPromptSectionContent.Normalize(request?.ToolInstructions),
             CreatedAt = now,
             UpdatedAt = now
         };
+
+        if (request is not null)
+        {
+            foreach (var definition in SystemPromptSections.All)
+            {
+                definition.SetOnEntity(systemPrompt, SystemPromptSectionContent.Normalize(definition.GetFromRequest(request)));
+            }
+        }
+
+        return systemPrompt;
     }
 }

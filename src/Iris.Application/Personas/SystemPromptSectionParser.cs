@@ -4,27 +4,17 @@ public static class SystemPromptSectionParser
 {
     public static bool TryParse(string value, out SystemPromptSection section)
     {
-        switch (Normalize(value))
+        var normalized = Normalize(value);
+        var match = SystemPromptSections.All.FirstOrDefault(d => Normalize(d.TagName) == normalized);
+
+        if (match is null)
         {
-            case "identity":
-                section = SystemPromptSection.Identity;
-                return true;
-            case "voice":
-                section = SystemPromptSection.Voice;
-                return true;
-            case "role":
-                section = SystemPromptSection.Role;
-                return true;
-            case "relationship":
-                section = SystemPromptSection.Relationship;
-                return true;
-            case "toolinstructions":
-                section = SystemPromptSection.ToolInstructions;
-                return true;
-            default:
-                section = default;
-                return false;
+            section = default;
+            return false;
         }
+
+        section = match.Section;
+        return true;
     }
 
     internal static string Normalize(string value)
