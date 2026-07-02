@@ -10,6 +10,7 @@ using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Queries;
 using Iris.Application.Identity.Interfaces;
 using Iris.Application.Personas;
+using Iris.Tests.Integration.Helpers;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
@@ -30,28 +31,21 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
 
     private Task SendCommand<TResponse>(IRequest<TResponse> command) => SendCommandAs(_userId, command);
 
-    private async Task SendCommandAs<TResponse>(Guid userId, IRequest<TResponse> command)
-    {
-        using var scope = _factory.Services.CreateScope();
-        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
-        userService.OverrideUserId = userId;
-        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
-        await mediator.Send(command, TestContext.Current.CancellationToken);
-    }
+    private Task SendCommandAs<TResponse>(Guid userId, IRequest<TResponse> command) =>
+        _factory.Services.SendCommandAsAsync(userId, command, TestContext.Current.CancellationToken);
 
-    private async Task<PersonaDto> CreatePersonaAsync(
+    private Task<PersonaDto> CreatePersonaAsync(
         string name = "Iris",
         SystemPromptSectionsRequest? systemPrompt = null,
         string? modelPreference = null,
-        Guid? userId = null)
-    {
-        using var scope = _factory.Services.CreateScope();
-        var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
-        return await personaService.CreateAsync(
+        Guid? userId = null) =>
+        TestPersonas.CreateAsync(
+            _factory.Services,
             userId ?? _userId,
-            new CreatePersonaRequest(name, systemPrompt, ModelPreference: modelPreference),
+            name,
+            systemPrompt,
+            modelPreference,
             TestContext.Current.CancellationToken);
-    }
 
     private static ChatRequestDto CreateChatRequest(
         string userMessage = "Hello!",

@@ -1,7 +1,6 @@
-using System.Runtime.CompilerServices;
 using Iris.Application.AiIntegration;
-using Iris.Application.AiIntegration.Models;
 using Iris.Infrastructure.Persistence;
+using Iris.Tests.Integration.Helpers;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.Hosting;
@@ -9,8 +8,6 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using NSubstitute;
-using Testcontainers.PostgreSql;
 
 namespace Iris.Tests.Integration;
 
@@ -20,36 +17,13 @@ public class ApiTestFactory : WebApplicationFactory<Program>, IAsyncLifetime
     private const string TestJwtIssuer = "Iris.Api";
     private const string TestJwtAudience = "Iris.Client";
 
-    private readonly PostgreSqlContainer _dbContainer = new PostgreSqlBuilder("postgres:latest")
-        .WithDatabase("iris_test")
-        .WithUsername("test")
-        .WithPassword("test")
-        .Build();
+    private readonly TestPostgres _postgres = new();
 
     /// <summary>
     /// Shared mock IChatProvider. Configure per test via NSubstitute.
     /// Default: returns "Mock AI response" with 10/5 tokens.
     /// </summary>
-    public IChatProvider MockChatProvider { get; } = CreateDefaultMockChatProvider();
-
-    private static IChatProvider CreateDefaultMockChatProvider()
-    {
-        var mock = Substitute.For<IChatProvider>();
-        mock.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
-            .Returns(call => StreamResponse("Mock AI response", call.ArgAt<CancellationToken>(1)));
-        return mock;
-    }
-
-    private static async IAsyncEnumerable<StreamedChunk> StreamResponse(
-        string content,
-        [EnumeratorCancellation] CancellationToken ct = default)
-    {
-        ct.ThrowIfCancellationRequested();
-        yield return new StreamedChunk(content, false, null);
-        await Task.Yield();
-        ct.ThrowIfCancellationRequested();
-        yield return new StreamedChunk(null, true, new UsageInfo(10, 5, 15));
-    }
+    public IChatProvider MockChatProvider { get; } = ChatProviderMock.CreateDefault();
 
     public HttpClient CreateAuthenticatedClient(Guid userId, string email = "test@iris.local")
     {
@@ -90,7 +64,7 @@ public class ApiTestFactory : WebApplicationFactory<Program>, IAsyncLifetime
 
             // Add DbContext pointing to Testcontainers PostgreSQL
             services.AddDbContext<AppDbContext>(options =>
-                options.UseNpgsql(_dbContainer.GetConnectionString()));
+                options.UseNpgsql(_postgres.ConnectionString));
 
             // Replace real IChatProvider with mock
             var chatProviderDescriptor = services.SingleOrDefault(
@@ -111,17 +85,12 @@ public class ApiTestFactory : WebApplicationFactory<Program>, IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        await _dbContainer.StartAsync();
-
-        // Run migrations
-        using var scope = Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        await db.Database.MigrateAsync();
+        await _postgres.StartAndMigrateAsync();
     }
 
     public new async ValueTask DisposeAsync()
     {
-        await _dbContainer.StopAsync();
+        await _postgres.DisposeAsync();
         await base.DisposeAsync();
     }
 }

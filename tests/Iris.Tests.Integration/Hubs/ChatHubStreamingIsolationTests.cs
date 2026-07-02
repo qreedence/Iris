@@ -2,8 +2,7 @@ using FluentAssertions;
 using Iris.Api.Authentication;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
-using Iris.Application.Identity.Interfaces;
-using Iris.Application.Personas;
+using Iris.Tests.Integration.Helpers;
 using MediatR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -38,25 +37,13 @@ public class ChatHubStreamingIsolationTests : IClassFixture<ApiTestFactory>
         return connection;
     }
 
-    private async Task SendCommandAs<TResponse>(Guid userId, IRequest<TResponse> command)
-    {
-        using var scope = _factory.Services.CreateScope();
-        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
-        userService.OverrideUserId = userId;
-        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
-        await mediator.Send(command, TestContext.Current.CancellationToken);
-    }
+    private Task SendCommandAs<TResponse>(Guid userId, IRequest<TResponse> command) =>
+        _factory.Services.SendCommandAsAsync(userId, command, TestContext.Current.CancellationToken);
 
     private async Task<Guid> CreatePersonaForUserAsync(Guid userId)
     {
-        using var scope = _factory.Services.CreateScope();
-        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
-        userService.OverrideUserId = userId;
-        var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
-        var persona = await personaService.CreateAsync(
-            userId,
-            new CreatePersonaRequest("Test Persona"),
-            TestContext.Current.CancellationToken);
+        var persona = await TestPersonas.CreateAsync(
+            _factory.Services, userId, "Test Persona", ct: TestContext.Current.CancellationToken);
         return persona.Id;
     }
 

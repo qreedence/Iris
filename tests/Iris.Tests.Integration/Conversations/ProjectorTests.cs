@@ -1,11 +1,9 @@
 using FluentAssertions;
 using Iris.Application.Conversations.Commands.CreateConversation;
-using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
 using Iris.Tests.Integration.Helpers;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Iris.Tests.Integration.Conversations;
 
@@ -23,9 +21,7 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
     private async Task<TResponse> SendCommand<TResponse>(IRequest<TResponse> command)
     {
         using var provider = _factory.CreateServiceProvider();
-        using var scope = provider.CreateScope();
-        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
-        return await mediator.Send(command, TestContext.Current.CancellationToken);
+        return await provider.SendCommandAsync(command, TestContext.Current.CancellationToken);
     }
 
     /// <summary>
@@ -46,10 +42,8 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
     private async Task<Guid> CreatePersonaAsync()
     {
         using var provider = _factory.CreateServiceProvider();
-        using var scope = provider.CreateScope();
-        var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
-        var persona = await personaService.CreateAsync(
-            _userId, new CreatePersonaRequest("Iris"), TestContext.Current.CancellationToken);
+        var persona = await TestPersonas.CreateAsync(
+            provider, _userId, ct: TestContext.Current.CancellationToken);
         return persona.Id;
     }
 

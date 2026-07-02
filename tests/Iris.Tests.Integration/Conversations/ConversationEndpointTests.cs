@@ -7,12 +7,10 @@ using Iris.Api.Authentication;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Queries;
-using Iris.Application.Identity.Interfaces;
 using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
 using Iris.Tests.Integration.Helpers;
 using MediatR;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Iris.Tests.Integration.Conversations;
 
@@ -36,14 +34,8 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
 
     private Task SendCommand<TResponse>(IRequest<TResponse> command) => SendCommandAs(_userId, command);
 
-    private async Task SendCommandAs<TResponse>(Guid userId, IRequest<TResponse> command)
-    {
-        using var scope = _factory.Services.CreateScope();
-        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
-        userService.OverrideUserId = userId;
-        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
-        await mediator.Send(command, TestContext.Current.CancellationToken);
-    }
+    private Task SendCommandAs<TResponse>(Guid userId, IRequest<TResponse> command) =>
+        _factory.Services.SendCommandAsAsync(userId, command, TestContext.Current.CancellationToken);
 
     /// <summary>
     /// Seeds a MessageSent event as the fixture's authenticated user, equivalent to
@@ -140,25 +132,11 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         response2.StatusCode.Should().Be(HttpStatusCode.Created);
     }
 
-    private async Task<PersonaDto> CreatePersonaAsync(string name = "Iris")
-    {
-        using var scope = _factory.Services.CreateScope();
-        var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
-        return await personaService.CreateAsync(
-            _userId,
-            new CreatePersonaRequest(name),
-            TestContext.Current.CancellationToken);
-    }
+    private Task<PersonaDto> CreatePersonaAsync(string name = "Iris") =>
+        TestPersonas.CreateAsync(_factory.Services, _userId, name, ct: TestContext.Current.CancellationToken);
 
-    private async Task<PersonaDto> CreatePersonaForUserAsync(Guid userId, string name)
-    {
-        using var scope = _factory.Services.CreateScope();
-        var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
-        return await personaService.CreateAsync(
-            userId,
-            new CreatePersonaRequest(name),
-            TestContext.Current.CancellationToken);
-    }
+    private Task<PersonaDto> CreatePersonaForUserAsync(Guid userId, string name) =>
+        TestPersonas.CreateAsync(_factory.Services, userId, name, ct: TestContext.Current.CancellationToken);
 
     // ── POST /api/conversations — PersonaId on summary ───────────
 

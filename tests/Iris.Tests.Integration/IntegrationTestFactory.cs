@@ -6,32 +6,22 @@ using Iris.Application.Personas;
 using Iris.Infrastructure;
 using Iris.Infrastructure.Persistence;
 using Iris.Infrastructure.Personas;
+using Iris.Tests.Integration.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using NSubstitute;
-using Testcontainers.PostgreSql;
 
 namespace Iris.Tests.Integration;
 
 public class IntegrationTestFactory : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _dbContainer = new PostgreSqlBuilder("postgres:latest")
-        .WithDatabase("iris_test")
-        .WithUsername("test")
-        .WithPassword("test")
-        .Build();
+    private readonly TestPostgres _postgres = new();
 
     /// <summary>
     /// Shared mock IChatProvider. Configure per test via NSubstitute.
     /// Default: returns "Mock AI response" with 10/5 tokens.
     /// </summary>
-    public IChatProvider MockChatProvider { get; } = CreateDefaultMockChatProvider();
+    public IChatProvider MockChatProvider { get; } = ChatProviderMock.CreateDefault();
     public TestCurrentUserService CurrentUser { get; } = new();
-
-    private static IChatProvider CreateDefaultMockChatProvider()
-    {
-        return Substitute.For<IChatProvider>();
-    }
 
     /// <summary>
     /// Creates a raw DbContext for direct database queries and verification.
@@ -40,7 +30,7 @@ public class IntegrationTestFactory : IAsyncLifetime
     public AppDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseNpgsql(_dbContainer.GetConnectionString())
+            .UseNpgsql(_postgres.ConnectionString)
             .Options;
 
         return new AppDbContext(options, CurrentUser);
@@ -57,7 +47,7 @@ public class IntegrationTestFactory : IAsyncLifetime
         services.AddLogging();
         services.AddSingleton<ICurrentUserService>(CurrentUser);
         services.AddDbContext<AppDbContext>(options =>
-            options.UseNpgsql(_dbContainer.GetConnectionString()));
+            options.UseNpgsql(_postgres.ConnectionString));
 
         services.AddApplication();
         services.AddSingleton<IGlobalSystemPromptProvider>(
@@ -75,15 +65,12 @@ public class IntegrationTestFactory : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        await _dbContainer.StartAsync();
-
-        using var db = CreateDbContext();
-        await db.Database.MigrateAsync();
+        await _postgres.StartAndMigrateAsync();
     }
 
     public async ValueTask DisposeAsync()
     {
-        await _dbContainer.StopAsync();
+        await _postgres.DisposeAsync();
     }
 
     private class TestGlobalSystemPromptProvider : IGlobalSystemPromptProvider

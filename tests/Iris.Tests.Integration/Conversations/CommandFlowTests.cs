@@ -2,13 +2,11 @@ using FluentAssertions;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Exceptions;
-using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
 using Iris.Infrastructure.Persistence;
 using Iris.Tests.Integration.Helpers;
 using MediatR;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Iris.Tests.Integration.Conversations;
 
@@ -28,9 +26,7 @@ public class CommandFlowTests : IClassFixture<IntegrationTestFactory>
     private async Task<TResponse> SendCommand<TResponse>(IRequest<TResponse> command)
     {
         using var provider = _factory.CreateServiceProvider();
-        using var scope = provider.CreateScope();
-        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
-        return await mediator.Send(command, TestContext.Current.CancellationToken);
+        return await provider.SendCommandAsync(command, TestContext.Current.CancellationToken);
     }
 
     /// <summary>
@@ -74,10 +70,8 @@ public class CommandFlowTests : IClassFixture<IntegrationTestFactory>
         _factory.CurrentUser.UserId = userId;
 
         using var provider = _factory.CreateServiceProvider();
-        using var scope = provider.CreateScope();
-        var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
-        var persona = await personaService.CreateAsync(
-            userId, new CreatePersonaRequest("Iris"), TestContext.Current.CancellationToken);
+        var persona = await TestPersonas.CreateAsync(
+            provider, userId, ct: TestContext.Current.CancellationToken);
         return persona.Id;
     }
 

@@ -5,7 +5,6 @@ using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Queries;
 using Iris.Application.Identity.Interfaces;
-using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
 using Iris.Tests.Integration.Helpers;
@@ -29,14 +28,8 @@ public class TenantIsolationTests : IClassFixture<ApiTestFactory>
         _factory = factory;
     }
 
-    private async Task SendCommandAs<TResponse>(Guid userId, IRequest<TResponse> command)
-    {
-        using var scope = _factory.Services.CreateScope();
-        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
-        userService.OverrideUserId = userId;
-        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
-        await mediator.Send(command, TestContext.Current.CancellationToken);
-    }
+    private Task SendCommandAs<TResponse>(Guid userId, IRequest<TResponse> command) =>
+        _factory.Services.SendCommandAsAsync(userId, command, TestContext.Current.CancellationToken);
 
     /// <summary>
     /// Seeds a MessageSent event as the given user, equivalent to what
@@ -61,10 +54,8 @@ public class TenantIsolationTests : IClassFixture<ApiTestFactory>
     /// </summary>
     private async Task<Guid> CreatePersonaAsync(Guid userId)
     {
-        using var scope = _factory.Services.CreateScope();
-        var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
-        var persona = await personaService.CreateAsync(
-            userId, new CreatePersonaRequest("Iris"), TestContext.Current.CancellationToken);
+        var persona = await TestPersonas.CreateAsync(
+            _factory.Services, userId, ct: TestContext.Current.CancellationToken);
         return persona.Id;
     }
 

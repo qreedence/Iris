@@ -8,10 +8,10 @@ using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Identity.Interfaces;
-using Iris.Application.Personas;
 using Iris.Domain.Conversations.Entities;
 using Iris.Domain.Conversations.Events;
 using Iris.Infrastructure.Persistence;
+using Iris.Tests.Integration.Helpers;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,32 +36,21 @@ public class ConversationTurnWorkerTests : IClassFixture<ApiTestFactory>
         _client = factory.CreateAuthenticatedClient(_userId);
     }
 
-    private async Task SendCommandAs<TResponse>(Guid userId, IRequest<TResponse> command)
-    {
-        using var scope = _factory.Services.CreateScope();
-        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
-        userService.OverrideUserId = userId;
-        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
-        await mediator.Send(command, TestContext.Current.CancellationToken);
-    }
+    private Task SendCommandAs<TResponse>(Guid userId, IRequest<TResponse> command) =>
+        _factory.Services.SendCommandAsAsync(userId, command, TestContext.Current.CancellationToken);
 
     private async Task<Guid> CreatePersonaAsync()
     {
-        using var scope = _factory.Services.CreateScope();
-        var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
-        userService.OverrideUserId = _userId;
-        var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
-        var persona = await personaService.CreateAsync(
-            _userId, new CreatePersonaRequest("Iris"), TestContext.Current.CancellationToken);
+        var persona = await TestPersonas.CreateAsync(
+            _factory.Services, _userId, ct: TestContext.Current.CancellationToken);
         return persona.Id;
     }
 
     private async Task<Guid> CreateConversationAsync()
     {
         var personaId = await CreatePersonaAsync();
-        var conversationId = Guid.NewGuid();
-        await SendCommandAs(_userId, new CreateConversationCommand(conversationId, _userId, personaId, "Chat"));
-        return conversationId;
+        return await TestConversations.CreateAsync(
+            _factory.Services, _userId, personaId, "Chat", TestContext.Current.CancellationToken);
     }
 
     private Task PostChatAsync(Guid conversationId, string userMessage) =>
@@ -364,23 +353,17 @@ public class ConversationTurnWorkerTests : IClassFixture<ApiTestFactory>
     public async Task CancelChat_OtherUsersConversation_Returns404()
     {
         var otherUserId = Guid.NewGuid();
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
-            userService.OverrideUserId = otherUserId;
-            var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
-            var persona = await personaService.CreateAsync(
-                otherUserId, new CreatePersonaRequest("Iris"), TestContext.Current.CancellationToken);
-            var conversationId = Guid.NewGuid();
-            await SendCommandAs(otherUserId, new CreateConversationCommand(conversationId, otherUserId, persona.Id, "Not Mine"));
+        var persona = await TestPersonas.CreateAsync(
+            _factory.Services, otherUserId, ct: TestContext.Current.CancellationToken);
+        var conversationId = Guid.NewGuid();
+        await SendCommandAs(otherUserId, new CreateConversationCommand(conversationId, otherUserId, persona.Id, "Not Mine"));
 
-            var response = await _client.PostAsync(
-                $"/api/conversations/{conversationId}/chat/cancel",
-                content: null,
-                TestContext.Current.CancellationToken);
+        var response = await _client.PostAsync(
+            $"/api/conversations/{conversationId}/chat/cancel",
+            content: null,
+            TestContext.Current.CancellationToken);
 
-            response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        }
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     // ── Cancellation: mid-stream flavour (4.4) ────────────────────

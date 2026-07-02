@@ -1,12 +1,10 @@
 using FluentAssertions;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Identity.Interfaces;
-using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Personas;
 using Iris.Infrastructure.Persistence;
 using Iris.Tests.Integration.Helpers;
-using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -45,23 +43,14 @@ public class TenantQueryFilterGuardTests : IClassFixture<ApiTestFactory>
 
     private async Task<Guid> CreatePersonaAsync(Guid userId)
     {
-        using var scope = CreateScopeAs(userId);
-        var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
-        var persona = await personaService.CreateAsync(
-            userId, new CreatePersonaRequest("Iris"), TestContext.Current.CancellationToken);
+        var persona = await TestPersonas.CreateAsync(
+            _factory.Services, userId, ct: TestContext.Current.CancellationToken);
         return persona.Id;
     }
 
-    private async Task<Guid> CreateConversationAsync(Guid userId, Guid personaId)
-    {
-        using var scope = CreateScopeAs(userId);
-        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
-        var conversationId = Guid.NewGuid();
-        await mediator.Send(
-            new CreateConversationCommand(conversationId, userId, personaId, "Guarded Chat"),
-            TestContext.Current.CancellationToken);
-        return conversationId;
-    }
+    private Task<Guid> CreateConversationAsync(Guid userId, Guid personaId) =>
+        TestConversations.CreateAsync(
+            _factory.Services, userId, personaId, "Guarded Chat", TestContext.Current.CancellationToken);
 
     // ── Persona ──────────────────────────────────────────────────
 
