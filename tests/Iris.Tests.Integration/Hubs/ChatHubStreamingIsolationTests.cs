@@ -85,10 +85,16 @@ public class ChatHubStreamingIsolationTests : IClassFixture<ApiTestFactory>
         var conversationId = Guid.NewGuid();
         await SendCommandAs(_userA, new CreateConversationCommand(conversationId, _userA, personaId, "User A Chat"));
 
-        // User A joins their conversation
+        // User A joins their conversation. A TaskCompletionSource signals the exact
+        // moment SignalR delivers the chunk, instead of hoping a fixed delay is enough.
+        var chunkReceivedByA = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var connectionA = await CreateHubConnectionAsync(_userA);
         var chunksA = new List<string>();
-        connectionA.On<string>("ReceiveChunk", chunk => chunksA.Add(chunk));
+        connectionA.On<string>("ReceiveChunk", chunk =>
+        {
+            chunksA.Add(chunk);
+            chunkReceivedByA.TrySetResult();
+        });
         await connectionA.InvokeAsync(
             "JoinConversation",
             conversationId,
@@ -117,8 +123,8 @@ public class ChatHubStreamingIsolationTests : IClassFixture<ApiTestFactory>
         var notifier = scope.ServiceProvider.GetRequiredService<IChatStreamNotifier>();
         await notifier.SendChunkAsync(conversationId, "secret data", TestContext.Current.CancellationToken);
 
-        // Give SignalR a moment to deliver
-        await Task.Delay(100, TestContext.Current.CancellationToken);
+        // Wait for the deterministic delivery signal instead of a fixed delay.
+        await chunkReceivedByA.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
 
         // Assert
         chunksA.Should().Contain("secret data", "user A should receive chunks for their conversation");

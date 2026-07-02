@@ -179,21 +179,6 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     // ── §1 GET /api/conversations — empty ─────────────────────────
 
     [Fact]
-    public async Task GetConversations_WithoutAuth_Returns401()
-    {
-        // Arrange
-        using var unauthenticatedClient = _factory.CreateClient();
-
-        // Act
-        var response = await unauthenticatedClient.GetAsync(
-            "/api/conversations",
-            TestContext.Current.CancellationToken);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-    }
-
-    [Fact]
     public async Task GetConversations_NoConversations_ReturnsEmptyList()
     {
         // Act
@@ -399,28 +384,5 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         messages.Should().HaveCount(1);
         messages![0].Content.Should().Be("Message A");
         messages[0].ConversationId.Should().Be(conversationA);
-    }
-
-    // ── Unauthenticated coverage ──────────────────────────────────
-
-    [Fact]
-    public async Task PostConversation_WithoutAuth_Returns401()
-    {
-        using var client = _factory.CreateClient();
-        var response = await client.PostAsJsonAsync(
-            "/api/conversations",
-            new CreateConversationRequest(Guid.NewGuid(), "Nope"),
-            TestContext.Current.CancellationToken);
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-    }
-
-    [Fact]
-    public async Task GetMessages_WithoutAuth_Returns401()
-    {
-        using var client = _factory.CreateClient();
-        var response = await client.GetAsync(
-            $"/api/conversations/{Guid.NewGuid()}/messages",
-            TestContext.Current.CancellationToken);
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 }

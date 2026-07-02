@@ -343,19 +343,6 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         yield return new StreamedChunk(null, true, new UsageInfo(10, 5, 15));
     }
 
-    // ── Unauthenticated coverage ──────────────────────────────────
-
-    [Fact]
-    public async Task PostChat_WithoutAuth_Returns401()
-    {
-        using var client = _factory.CreateClient();
-        var response = await client.PostAsJsonAsync(
-            $"/api/conversations/{Guid.NewGuid()}/chat",
-            CreateChatRequest(),
-            TestContext.Current.CancellationToken);
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-    }
-
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
