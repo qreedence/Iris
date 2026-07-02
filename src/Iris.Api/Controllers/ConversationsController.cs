@@ -1,5 +1,6 @@
 using Iris.Api.Authentication;
 using Iris.Application.Conversations;
+using Iris.Application.Conversations.Commands.CancelConversationTurn;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Commands.StartConversationTurn;
 using Iris.Application.Conversations.Queries;
@@ -86,6 +87,20 @@ public class ConversationsController : ControllerBase
         };
 
         await _mediator.Send(command, ct);
+
+        return Accepted();
+    }
+
+    [HttpPost("{id:guid}/chat/cancel")]
+    [ProducesResponseType(202)]
+    [ProducesResponseType<ProblemDetails>(404)]
+    public async Task<IActionResult> CancelChat(
+        Guid id,
+        CancellationToken ct = default)
+    {
+        // No active turn is treated as an idempotent no-op (still 202), so clients
+        // can retry "stop generating" without racing the worker into an error.
+        await _mediator.Send(new CancelConversationTurnCommand { ConversationId = id }, ct);
 
         return Accepted();
     }

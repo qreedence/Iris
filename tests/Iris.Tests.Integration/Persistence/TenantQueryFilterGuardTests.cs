@@ -195,4 +195,53 @@ public class TenantQueryFilterGuardTests : IClassFixture<ApiTestFactory>
             "ConversationMessages is intentionally unfiltered; isolation for it comes from " +
             "ConversationQueries.GetMessagesAsync's ExistsForUserAsync pre-check, not a query filter");
     }
+
+    // ── ConversationTurnRequests — intentionally NOT filtered ───────
+
+    [Fact]
+    public async Task ConversationTurnRequests_HasNoQueryFilter_OtherUsersRowsAreVisibleWithoutIgnoreQueryFilters()
+    {
+        // Like ConversationMessages and StoredEvents, conversation_turn_requests is
+        // a system/worker table with NO EF query filter (see
+        // AppDbContext.OnModelCreating). The background worker must be able to claim
+        // and process turn requests across ALL users, so a per-user filter would
+        // break it. Tenant isolation for enqueue/cancel is enforced instead by the
+        // ExistsForUserAsync ownership check at the command boundary
+        // (StartConversationTurnHandler / CancelConversationTurnHandler).
+        //
+        // This test seeds a turn request as user A, then reads it back directly as
+        // user B with NO IgnoreQueryFilters — it must be visible, because there is
+        // no filter to ignore. If it ever comes back empty, a query filter was added
+        // to ConversationTurnRequests, which would silently break the worker.
+        var conversationId = Guid.NewGuid();
+
+        using (var seedScope = CreateScopeAs(_userA))
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.ConversationTurnRequests.Add(new Iris.Domain.Conversations.Entities.ConversationTurnRequest
+            {
+                Id = Guid.NewGuid(),
+                ConversationId = conversationId,
+                UserId = _userA,
+                Model = "test/model",
+                Status = Iris.Domain.Conversations.Entities.ConversationTurnStatus.Pending,
+                CreatedAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        // Act — query directly as user B, no IgnoreQueryFilters.
+        using var scope = CreateScopeAs(_userB);
+        var readDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var rows = await readDb.ConversationTurnRequests
+            .Where(r => r.ConversationId == conversationId)
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        rows.Should().ContainSingle(r => r.UserId == _userA,
+            "ConversationTurnRequests is intentionally unfiltered so the background worker " +
+            "can process turns across all users; isolation comes from the command-boundary " +
+            "ExistsForUserAsync check, not a query filter");
+    }
 }
