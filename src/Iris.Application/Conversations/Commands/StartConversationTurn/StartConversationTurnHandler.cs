@@ -1,6 +1,8 @@
+using System.Text.Json;
 using Iris.Application.Conversations.Queries;
 using Iris.Application.Exceptions;
 using Iris.Domain.AiIntegration;
+using Iris.Domain.Conversations.Entities;
 using Iris.Domain.Conversations.Events;
 using MediatR;
 
@@ -10,16 +12,19 @@ public class StartConversationTurnHandler : IRequestHandler<StartConversationTur
 {
     private readonly IConversationQueries _conversationQueries;
     private readonly IConversationEventRecorder _eventRecorder;
-    private readonly IConversationTurnQueue _turnQueue;
+    private readonly IConversationTurnRequestStore _turnRequestStore;
+    private readonly ITurnDoorbell _doorbell;
 
     public StartConversationTurnHandler(
         IConversationQueries conversationQueries,
         IConversationEventRecorder eventRecorder,
-        IConversationTurnQueue turnQueue)
+        IConversationTurnRequestStore turnRequestStore,
+        ITurnDoorbell doorbell)
     {
         _conversationQueries = conversationQueries;
         _eventRecorder = eventRecorder;
-        _turnQueue = turnQueue;
+        _turnRequestStore = turnRequestStore;
+        _doorbell = doorbell;
     }
 
     public async Task<Unit> Handle(StartConversationTurnCommand command, CancellationToken ct)
@@ -46,18 +51,33 @@ public class StartConversationTurnHandler : IRequestHandler<StartConversationTur
             command.UserMessage,
             ChatRole.User);
 
+        // INVARIANT: AddPending must run BEFORE RecordAsync. Both operate on the
+        // same scoped DbContext, so the event store's single SaveChangesAsync
+        // commits the queue row and the MessageSent event in one transaction —
+        // the turn is never durably enqueued without its user message, or vice
+        // versa. If the append fails, the tracked-but-unsaved row is discarded.
+        var turnRequest = new ConversationTurnRequest
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = command.ConversationId,
+            UserId = command.UserId,
+            Model = command.Model,
+            ChangeModel = command.ChangeModel,
+            ModelParameters = command.ModelParameters is null
+                ? null
+                : JsonSerializer.Serialize(command.ModelParameters),
+            Status = ConversationTurnStatus.Pending,
+            AttemptCount = 0,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+
+        _turnRequestStore.AddPending(turnRequest);
+
         await _eventRecorder.RecordAsync(command.ConversationId, [message], ct);
 
-        await _turnQueue.EnqueueAsync(
-            new ConversationTurnWorkItem
-            {
-                UserId = command.UserId,
-                ConversationId = command.ConversationId,
-                Model = command.Model,
-                ChangeModel = command.ChangeModel,
-                ModelParameters = command.ModelParameters,
-            },
-            ct);
+        // Ring AFTER the commit so the worker cannot poll, miss the not-yet-visible
+        // row, and then wait a full PollInterval before noticing it.
+        _doorbell.Ring();
 
         return Unit.Value;
     }

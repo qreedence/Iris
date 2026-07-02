@@ -73,7 +73,9 @@ public class ApiTestFactory : WebApplicationFactory<Program>, IAsyncLifetime
                 ["Google:ClientId"] = "test-google-client-id",
                 ["Google:ClientSecret"] = "test-google-client-secret",
                 ["IrisSystemPrompt:AppContext"] = "Test app context",
-                ["IrisSystemPrompt:Guidelines"] = "Test guidelines"
+                ["IrisSystemPrompt:Guidelines"] = "Test guidelines",
+                // Fast poll so tests don't sleep waiting for the worker to notice work.
+                ["TurnProcessing:PollInterval"] = "00:00:00.100"
             });
         });
 

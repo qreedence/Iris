@@ -31,32 +31,46 @@ public class EfConversationTurnRequestStore : IConversationTurnRequestStore
             return [];
 
         // Claim the oldest Pending row per conversation, skipping any conversation
-        // that already has a Processing row. FOR UPDATE SKIP LOCKED makes the inner
-        // selection safe under concurrency; DISTINCT ON keeps it to one row per
-        // conversation. The worker is a singleton and claims inside a single loop
-        // iteration, so claim rounds are inherently serial — but SKIP LOCKED plus
-        // the "no Processing row for this conversation" guard also make it safe
-        // even if a second claimer ran concurrently.
+        // that already has a Processing row. Postgres forbids FOR UPDATE together
+        // with DISTINCT/window functions, so "one row per conversation" is expressed
+        // as a plain SELECT with a NOT EXISTS that excludes rows having an earlier
+        // eligible sibling in the same conversation — leaving only the oldest. That
+        // plain SELECT can safely take FOR UPDATE SKIP LOCKED inside a CTE, and the
+        // outer UPDATE ... RETURNING maps the claimed rows back to the entity.
+        //
+        // Concurrency: the worker is a singleton and claims inside a single loop
+        // iteration, so claim rounds are inherently serial. Even if a second claimer
+        // ran concurrently, SKIP LOCKED plus the "no Processing row for this
+        // conversation" guard prevent two rows for the same conversation from both
+        // being claimed.
         const string sql =
             """
+            WITH claimed AS (
+                SELECT o."Id"
+                FROM conversation_turn_requests AS o
+                WHERE o."Status" = 'Pending'
+                  AND o."AttemptCount" < @maxAttempts
+                  AND NOT EXISTS (
+                      SELECT 1 FROM conversation_turn_requests AS p
+                      WHERE p."ConversationId" = o."ConversationId"
+                        AND p."Status" = 'Processing'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM conversation_turn_requests AS e
+                      WHERE e."ConversationId" = o."ConversationId"
+                        AND e."Status" = 'Pending'
+                        AND e."AttemptCount" < @maxAttempts
+                        AND (e."CreatedAt", e."Id") < (o."CreatedAt", o."Id")
+                  )
+                ORDER BY o."CreatedAt"
+                FOR UPDATE SKIP LOCKED
+                LIMIT @maxCount
+            )
             UPDATE conversation_turn_requests AS t
             SET "Status" = 'Processing',
                 "ClaimedAt" = now(),
                 "AttemptCount" = t."AttemptCount" + 1
-            FROM (
-                SELECT DISTINCT ON (c."ConversationId") c."Id"
-                FROM conversation_turn_requests AS c
-                WHERE c."Status" = 'Pending'
-                  AND c."AttemptCount" < @maxAttempts
-                  AND NOT EXISTS (
-                      SELECT 1 FROM conversation_turn_requests AS p
-                      WHERE p."ConversationId" = c."ConversationId"
-                        AND p."Status" = 'Processing'
-                  )
-                ORDER BY c."ConversationId", c."CreatedAt"
-                FOR UPDATE OF c SKIP LOCKED
-                LIMIT @maxCount
-            ) AS claimed
+            FROM claimed
             WHERE t."Id" = claimed."Id"
             RETURNING t.*;
             """;

@@ -5,6 +5,7 @@ using Iris.Application.Conversations.Commands.StartConversationTurn;
 using Iris.Application.Conversations.Queries;
 using Iris.Application.Exceptions;
 using Iris.Domain.AiIntegration;
+using Iris.Domain.Conversations.Entities;
 using Iris.Domain.Conversations.Events;
 using NSubstitute;
 
@@ -14,7 +15,8 @@ public class StartConversationTurnHandlerTests
 {
     private readonly IConversationQueries _conversationQueries = Substitute.For<IConversationQueries>();
     private readonly IConversationEventRecorder _eventRecorder = Substitute.For<IConversationEventRecorder>();
-    private readonly IConversationTurnQueue _turnQueue = Substitute.For<IConversationTurnQueue>();
+    private readonly IConversationTurnRequestStore _turnRequestStore = Substitute.For<IConversationTurnRequestStore>();
+    private readonly ITurnDoorbell _doorbell = Substitute.For<ITurnDoorbell>();
 
     private StartConversationTurnHandler CreateSut()
     {
@@ -24,15 +26,11 @@ public class StartConversationTurnHandlerTests
                 Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<RecordedEvent>>(Array.Empty<RecordedEvent>()));
 
-        _turnQueue.EnqueueAsync(
-                Arg.Any<ConversationTurnWorkItem>(),
-                Arg.Any<CancellationToken>())
-            .Returns(ValueTask.CompletedTask);
-
         _eventRecorder.ClearReceivedCalls();
-        _turnQueue.ClearReceivedCalls();
+        _turnRequestStore.ClearReceivedCalls();
+        _doorbell.ClearReceivedCalls();
 
-        return new StartConversationTurnHandler(_conversationQueries, _eventRecorder, _turnQueue);
+        return new StartConversationTurnHandler(_conversationQueries, _eventRecorder, _turnRequestStore, _doorbell);
     }
 
     private static StartConversationTurnCommand CreateValidCommand(
@@ -89,13 +87,42 @@ public class StartConversationTurnHandlerTests
                 ((MessageSent)events.First()).Role == ChatRole.User),
             Arg.Any<CancellationToken>());
 
-        await _turnQueue.Received(1).EnqueueAsync(
-            Arg.Is<ConversationTurnWorkItem>(workItem =>
-                workItem.ConversationId == conversationId &&
-                workItem.Model == command.Model &&
-                workItem.ChangeModel == command.ChangeModel &&
-                workItem.ModelParameters == modelParameters),
-            Arg.Any<CancellationToken>());
+        _turnRequestStore.Received(1).AddPending(
+            Arg.Is<ConversationTurnRequest>(request =>
+                request.ConversationId == conversationId &&
+                request.UserId == userId &&
+                request.Model == command.Model &&
+                request.ChangeModel == command.ChangeModel &&
+                request.Status == ConversationTurnStatus.Pending &&
+                request.AttemptCount == 0 &&
+                request.ModelParameters != null));
+
+        _doorbell.Received(1).Ring();
+    }
+
+    [Fact]
+    public async Task Handle_ValidCommand_AddsPendingBeforeRecordingEvent()
+    {
+        // Arrange — the atomic-enqueue invariant depends on AddPending happening
+        // before RecordAsync (the shared DbContext's SaveChangesAsync commits both).
+        var conversationId = Guid.NewGuid();
+        SetupExistingConversation(conversationId);
+        var sut = CreateSut();
+        var command = CreateValidCommand(conversationId: conversationId);
+
+        var callOrder = new List<string>();
+        _turnRequestStore
+            .When(s => s.AddPending(Arg.Any<ConversationTurnRequest>()))
+            .Do(_ => callOrder.Add("AddPending"));
+        _eventRecorder
+            .When(r => r.RecordAsync(Arg.Any<Guid>(), Arg.Any<IEnumerable<ConversationEvent>>(), Arg.Any<CancellationToken>()))
+            .Do(_ => callOrder.Add("RecordAsync"));
+
+        // Act
+        await sut.Handle(command, CancellationToken.None);
+
+        // Assert
+        callOrder.Should().Equal("AddPending", "RecordAsync");
     }
 
     [Theory]
@@ -122,9 +149,8 @@ public class StartConversationTurnHandlerTests
             Arg.Any<IEnumerable<ConversationEvent>>(),
             Arg.Any<CancellationToken>());
 
-        await _turnQueue.DidNotReceive().EnqueueAsync(
-            Arg.Any<ConversationTurnWorkItem>(),
-            Arg.Any<CancellationToken>());
+        _turnRequestStore.DidNotReceive().AddPending(Arg.Any<ConversationTurnRequest>());
+        _doorbell.DidNotReceive().Ring();
     }
 
     [Fact]
@@ -147,9 +173,8 @@ public class StartConversationTurnHandlerTests
             Arg.Any<IEnumerable<ConversationEvent>>(),
             Arg.Any<CancellationToken>());
 
-        await _turnQueue.DidNotReceive().EnqueueAsync(
-            Arg.Any<ConversationTurnWorkItem>(),
-            Arg.Any<CancellationToken>());
+        _turnRequestStore.DidNotReceive().AddPending(Arg.Any<ConversationTurnRequest>());
+        _doorbell.DidNotReceive().Ring();
     }
 
     [Fact]
@@ -171,9 +196,8 @@ public class StartConversationTurnHandlerTests
             Arg.Any<IEnumerable<ConversationEvent>>(),
             Arg.Any<CancellationToken>());
 
-        await _turnQueue.DidNotReceive().EnqueueAsync(
-            Arg.Any<ConversationTurnWorkItem>(),
-            Arg.Any<CancellationToken>());
+        _turnRequestStore.DidNotReceive().AddPending(Arg.Any<ConversationTurnRequest>());
+        _doorbell.DidNotReceive().Ring();
     }
 
     [Theory]
@@ -200,9 +224,8 @@ public class StartConversationTurnHandlerTests
             Arg.Any<IEnumerable<ConversationEvent>>(),
             Arg.Any<CancellationToken>());
 
-        await _turnQueue.DidNotReceive().EnqueueAsync(
-            Arg.Any<ConversationTurnWorkItem>(),
-            Arg.Any<CancellationToken>());
+        _turnRequestStore.DidNotReceive().AddPending(Arg.Any<ConversationTurnRequest>());
+        _doorbell.DidNotReceive().Ring();
     }
 
     [Fact]
@@ -228,8 +251,7 @@ public class StartConversationTurnHandlerTests
             Arg.Any<IEnumerable<ConversationEvent>>(),
             Arg.Any<CancellationToken>());
 
-        await _turnQueue.DidNotReceive().EnqueueAsync(
-            Arg.Any<ConversationTurnWorkItem>(),
-            Arg.Any<CancellationToken>());
+        _turnRequestStore.DidNotReceive().AddPending(Arg.Any<ConversationTurnRequest>());
+        _doorbell.DidNotReceive().Ring();
     }
 }

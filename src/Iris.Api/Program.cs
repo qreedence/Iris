@@ -94,7 +94,15 @@ builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IChatStreamNotifier, SignalRChatStreamNotifier>();
-builder.Services.AddSingleton<IConversationTurnQueue, ConversationTurnQueue>();
+builder.Services.AddOptions<TurnProcessingOptions>()
+    .Bind(builder.Configuration.GetSection(TurnProcessingOptions.SectionName))
+    .Validate(o => o.MaxConcurrentTurns > 0, "TurnProcessing MaxConcurrentTurns must be greater than zero.")
+    .Validate(o => o.PollInterval > TimeSpan.Zero, "TurnProcessing PollInterval must be greater than zero.")
+    .Validate(o => o.ClaimLease > TimeSpan.Zero, "TurnProcessing ClaimLease must be greater than zero.")
+    .Validate(o => o.MaxAttempts > 0, "TurnProcessing MaxAttempts must be greater than zero.")
+    .ValidateOnStart();
+builder.Services.AddSingleton<ITurnDoorbell, TurnDoorbell>();
+builder.Services.AddSingleton<IActiveTurnRegistry, ActiveTurnRegistry>();
 builder.Services.AddHostedService<ConversationTurnWorker>();
 builder.Services.AddScoped<AuthCookieService>();
 builder.Services.AddHttpContextAccessor();

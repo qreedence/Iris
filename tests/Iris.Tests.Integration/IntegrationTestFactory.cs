@@ -64,7 +64,10 @@ public class IntegrationTestFactory : IAsyncLifetime
             new TestGlobalSystemPromptProvider("Test app context", "Test guidelines"));
         services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(EfEventStore).Assembly));
         services.AddScoped<IEventStore, EfEventStore>();
+        services.AddScoped<IConversationTurnRequestStore, EfConversationTurnRequestStore>();
         services.AddScoped<IPersonaService, PersonaService>();
+        services.AddSingleton<ITurnDoorbell, Iris.Api.Conversations.TurnDoorbell>();
+        services.AddSingleton<IActiveTurnRegistry, Iris.Api.Conversations.ActiveTurnRegistry>();
         services.AddSingleton(MockChatProvider);
 
         return services.BuildServiceProvider();
