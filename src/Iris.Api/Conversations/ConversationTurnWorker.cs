@@ -100,11 +100,27 @@ public class ConversationTurnWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var store = scope.ServiceProvider.GetRequiredService<IConversationTurnRequestStore>();
 
-        var failed = await store.RecoverOrphansAsync(_options.ClaimLease, _options.MaxAttempts, stoppingToken);
+        // Exclude conversations streaming in THIS process so orphan recovery never
+        // resets a live long-running stream. Single-instance assumption: any stale
+        // Processing row not in this set belongs to a process that is gone.
+        var atCap = await store.RecoverOrphansAsync(
+            _options.ClaimLease,
+            _options.MaxAttempts,
+            _activeTurns.ActiveConversationIds,
+            stoppingToken);
 
-        foreach (var orphan in failed)
+        foreach (var orphan in atCap)
         {
+            // FAILURE FINALIZATION ORDER: record the terminal TurnFailed event +
+            // notify FIRST, then mark the row Failed. A crash between the two leaves
+            // the row Processing at cap → the next recovery tick records a DUPLICATE
+            // TurnFailed then marks Failed (audit-only event; a missing terminal
+            // event is worse than a duplicated one).
+            //
+            // Single-instance assumption: only this worker recovers orphans, so the
+            // event-then-flip sequence is not racing another recoverer.
             await RecordTurnFailedAsync(scope.ServiceProvider, orphan, stoppingToken);
+            await UpdateStatusAsync(s => s.MarkFailedAsync(orphan.Id, "interrupted", CancellationToken.None));
         }
     }
 
@@ -153,7 +169,21 @@ public class ConversationTurnWorker : BackgroundService
 
         try
         {
-            await Task.WhenAll(inFlight);
+            // Honor the shutdown token: if the host's stop timeout elapses, stop
+            // waiting rather than blocking disposal indefinitely.
+            await Task.WhenAll(inFlight).WaitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning(
+                "Shutdown wait cancelled with {Count} in-flight turn task(s) still running",
+                _inFlight.Count);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning(
+                "Shutdown wait timed out with {Count} in-flight turn task(s) still running",
+                _inFlight.Count);
         }
         catch (Exception ex)
         {
@@ -194,10 +224,12 @@ public class ConversationTurnWorker : BackgroundService
                 turnCts.Token);
 
             // StreamAsync returns normally for success AND for user-cancellation
-            // (the orchestrator records TurnCancelled internally and returns). If
-            // the user cancelled mid-stream, mark the row Cancelled; otherwise the
-            // turn completed.
-            if (turnCts.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
+            // (the orchestrator records TurnCancelled internally and returns). Use
+            // the registry's cancellation SOURCE — not the raw token — so the worker
+            // and the orchestrator can never disagree about whether this was a user
+            // cancel. A host-shutdown cancel does NOT set the user-cancel flag and is
+            // instead handled by the OperationCanceledException catch below.
+            if (_activeTurns.WasUserCancelled(request.ConversationId))
             {
                 await UpdateStatusAsync(store => store.MarkCancelledAsync(request.Id, CancellationToken.None));
             }
@@ -253,8 +285,13 @@ public class ConversationTurnWorker : BackgroundService
                     request.ConversationId,
                     request.AttemptCount);
 
-                await UpdateStatusAsync(store => store.MarkFailedAsync(request.Id, ex.Message, CancellationToken.None));
+                // FAILURE FINALIZATION ORDER: record the terminal TurnFailed event +
+                // notify the client FIRST, then flip the row Failed. A crash between
+                // the two leaves the row Processing at cap → orphan recovery records a
+                // DUPLICATE TurnFailed then marks Failed (audit-only event; a missing
+                // terminal event is worse than a duplicated one).
                 await RecordInterruptedFailureAsync(request);
+                await UpdateStatusAsync(store => store.MarkFailedAsync(request.Id, ex.Message, CancellationToken.None));
             }
         }
         catch (Exception updateEx)

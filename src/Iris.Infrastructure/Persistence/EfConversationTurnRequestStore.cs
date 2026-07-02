@@ -144,9 +144,19 @@ public class EfConversationTurnRequestStore : IConversationTurnRequestStore
     public async Task<IReadOnlyList<ConversationTurnRequest>> RecoverOrphansAsync(
         TimeSpan claimLease,
         int maxAttempts,
+        IReadOnlyCollection<Guid> activeConversationIds,
         CancellationToken ct = default)
     {
         var cutoff = DateTimeOffset.UtcNow - claimLease;
+
+        // LEASE vs LIVE STREAMS: a turn actively streaming in THIS process must never
+        // be reset by lease expiry, no matter how long the stream runs. The worker
+        // passes the set of locally-active conversation ids; we exclude them here.
+        // This exclusion is exactly what makes single-instance lease expiry safe: any
+        // remaining stale Processing row belongs to a process that is gone. A
+        // multi-instance deployment would instead need per-row lease HEARTBEATS (a
+        // live worker periodically bumping ClaimedAt) — documented, out of scope.
+        var active = activeConversationIds as ISet<Guid> ?? activeConversationIds.ToHashSet();
 
         var orphans = await _db.ConversationTurnRequests
             .Where(r => r.Status == ConversationTurnStatus.Processing
@@ -154,40 +164,50 @@ public class EfConversationTurnRequestStore : IConversationTurnRequestStore
                         && r.ClaimedAt < cutoff)
             .ToListAsync(ct);
 
+        orphans = orphans.Where(o => !active.Contains(o.ConversationId)).ToList();
+
         if (orphans.Count == 0)
             return [];
 
-        var failed = new List<ConversationTurnRequest>();
+        var atCap = new List<ConversationTurnRequest>();
 
         foreach (var orphan in orphans)
         {
             if (orphan.AttemptCount >= maxAttempts)
             {
-                orphan.Status = ConversationTurnStatus.Failed;
-                orphan.CompletedAt = DateTimeOffset.UtcNow;
-                orphan.LastError = "interrupted";
-                failed.Add(orphan);
+                // Do NOT mutate here. Return the candidate so the caller records the
+                // terminal TurnFailed event FIRST, then flips the row Failed. A crash
+                // between those two steps leaves the row Processing at cap → the next
+                // recovery tick records a DUPLICATE TurnFailed (audit-only event;
+                // missing is worse than duplicated).
+                atCap.Add(orphan);
             }
             else
             {
-                orphan.Status = ConversationTurnStatus.Pending;
-                orphan.ClaimedAt = null;
-                orphan.LastError = "interrupted";
+                // Status-guarded reset: a racing terminal write (e.g. a cancel landing
+                // as we recover) cannot be resurrected — the WHERE Status==Processing
+                // matches zero rows and the reset is silently ignored.
+                await _db.ConversationTurnRequests
+                    .Where(r => r.Id == orphan.Id && r.Status == ConversationTurnStatus.Processing)
+                    .ExecuteUpdateAsync(
+                        s => s
+                            .SetProperty(r => r.Status, ConversationTurnStatus.Pending)
+                            .SetProperty(r => r.ClaimedAt, (DateTimeOffset?)null)
+                            .SetProperty(r => r.LastError, "interrupted"),
+                        ct);
             }
         }
 
-        await _db.SaveChangesAsync(ct);
-
-        return failed;
+        return atCap;
     }
 
-    public async Task<ConversationTurnRequest?> GetLatestActiveAsync(Guid conversationId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<ConversationTurnRequest>> GetActiveAsync(Guid conversationId, CancellationToken ct = default)
     {
         return await _db.ConversationTurnRequests
             .Where(r => r.ConversationId == conversationId
                         && (r.Status == ConversationTurnStatus.Pending
                             || r.Status == ConversationTurnStatus.Processing))
             .OrderByDescending(r => r.CreatedAt)
-            .FirstOrDefaultAsync(ct);
+            .ToListAsync(ct);
     }
 }

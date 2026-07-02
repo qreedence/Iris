@@ -10,11 +10,17 @@ namespace Iris.Api.Conversations;
 /// </summary>
 public class ActiveTurnRegistry : IActiveTurnRegistry
 {
-    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _active = new();
+    private readonly ConcurrentDictionary<Guid, Entry> _active = new();
+
+    private sealed class Entry(CancellationTokenSource cts)
+    {
+        public CancellationTokenSource Cts { get; } = cts;
+        public bool UserCancelled;
+    }
 
     public void Register(Guid conversationId, CancellationTokenSource cts)
     {
-        _active[conversationId] = cts;
+        _active[conversationId] = new Entry(cts);
     }
 
     public void Remove(Guid conversationId)
@@ -24,12 +30,16 @@ public class ActiveTurnRegistry : IActiveTurnRegistry
 
     public bool TryCancel(Guid conversationId)
     {
-        if (!_active.TryGetValue(conversationId, out var cts))
+        if (!_active.TryGetValue(conversationId, out var entry))
             return false;
+
+        // Mark the source BEFORE firing so a concurrent OCE catch in the orchestrator
+        // observes the user-cancel flag.
+        entry.UserCancelled = true;
 
         try
         {
-            cts.Cancel();
+            entry.Cts.Cancel();
         }
         catch (ObjectDisposedException)
         {
@@ -40,4 +50,11 @@ public class ActiveTurnRegistry : IActiveTurnRegistry
 
         return true;
     }
+
+    public bool WasUserCancelled(Guid conversationId)
+    {
+        return _active.TryGetValue(conversationId, out var entry) && entry.UserCancelled;
+    }
+
+    public IReadOnlyCollection<Guid> ActiveConversationIds => _active.Keys.ToArray();
 }

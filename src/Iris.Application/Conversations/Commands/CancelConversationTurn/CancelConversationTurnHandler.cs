@@ -29,26 +29,32 @@ public class CancelConversationTurnHandler : IRequestHandler<CancelConversationT
         if (!exists)
             throw new NotFoundException("Conversation does not exist.");
 
-        var active = await _turnRequestStore.GetLatestActiveAsync(command.ConversationId, ct);
+        var active = await _turnRequestStore.GetActiveAsync(command.ConversationId, ct);
 
         // No active turn: treat as an idempotent no-op (the endpoint returns 202).
         // This lets clients retry "stop generating" without racing the worker into
         // a 409 when the turn has just finished.
-        if (active is null)
+        if (active.Count == 0)
             return Unit.Value;
 
-        if (active.Status == ConversationTurnStatus.Pending)
+        var firedCts = false;
+
+        foreach (var turn in active)
         {
-            // Never claimed — mark Cancelled directly so the worker skips it.
-            await _turnRequestStore.MarkCancelledAsync(active.Id, ct);
-        }
-        else
-        {
-            // Processing — mark Cancelled and fire the in-process CTS. The worker's
-            // dispatch loop sees the cancellation, the orchestrator records
-            // TurnCancelled, and the row is already Cancelled.
-            await _turnRequestStore.MarkCancelledAsync(active.Id, ct);
-            _activeTurns.TryCancel(command.ConversationId);
+            if (turn.Status == ConversationTurnStatus.Pending)
+            {
+                // Never started — mark Cancelled directly so the worker skips it.
+                await _turnRequestStore.MarkCancelledAsync(turn.Id, ct);
+            }
+            else if (!firedCts)
+            {
+                // The single Processing turn (at most one per conversation) — mark
+                // Cancelled and fire the in-process CTS. The worker's dispatch loop
+                // sees the cancellation and the orchestrator records TurnCancelled.
+                await _turnRequestStore.MarkCancelledAsync(turn.Id, ct);
+                _activeTurns.TryCancel(command.ConversationId);
+                firedCts = true;
+            }
         }
 
         return Unit.Value;

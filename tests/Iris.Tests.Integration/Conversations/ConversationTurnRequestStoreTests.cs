@@ -121,9 +121,12 @@ public class ConversationTurnRequestStoreTests
         await using var db = _factory.CreateDbContext();
         var claimed = await CreateStore(db).ClaimPendingAsync(8, MaxAttempts, TestContext.Current.CancellationToken);
 
-        claimed.Select(r => r.Id).Should().Contain(new[] { a.Id, b.Id });
-        claimed.Should().OnlyContain(r => r.Status == ConversationTurnStatus.Processing);
-        claimed.Should().OnlyContain(r => r.AttemptCount == 1);
+        // The store claims table-wide, so scope the state assertions to the two rows
+        // this test seeded (other tests' leftover Pending rows may also be claimed).
+        var mine = claimed.Where(r => r.Id == a.Id || r.Id == b.Id).ToList();
+        mine.Select(r => r.Id).Should().BeEquivalentTo(new[] { a.Id, b.Id });
+        mine.Should().OnlyContain(r => r.Status == ConversationTurnStatus.Processing);
+        mine.Should().OnlyContain(r => r.AttemptCount == 1);
     }
 
     [Fact]
@@ -202,7 +205,7 @@ public class ConversationTurnRequestStoreTests
         await using (var recoverDb = _factory.CreateDbContext())
         {
             var failed = await CreateStore(recoverDb)
-                .RecoverOrphansAsync(TimeSpan.FromMinutes(5), MaxAttempts, TestContext.Current.CancellationToken);
+                .RecoverOrphansAsync(TimeSpan.FromMinutes(5), MaxAttempts, [], TestContext.Current.CancellationToken);
             failed.Should().BeEmpty("row is under the attempt cap so it is reset, not failed");
         }
 
@@ -212,8 +215,11 @@ public class ConversationTurnRequestStoreTests
     }
 
     [Fact]
-    public async Task RecoverOrphans_StaleProcessingAtCap_MarkedFailedAndReturned()
+    public async Task RecoverOrphans_StaleProcessingAtCap_ReturnedButNotMutated()
     {
+        // At-cap orphans are RETURNED without mutation so the caller records the
+        // terminal TurnFailed event FIRST, then flips the row Failed (event-before-
+        // row ordering). The store must leave the row Processing here.
         var conversationId = Guid.NewGuid();
         var id = Guid.NewGuid();
         await using (var db = _factory.CreateDbContext())
@@ -232,17 +238,60 @@ public class ConversationTurnRequestStoreTests
             await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
-        IReadOnlyList<ConversationTurnRequest> failed;
+        IReadOnlyList<ConversationTurnRequest> atCap;
         await using (var recoverDb = _factory.CreateDbContext())
         {
-            failed = await CreateStore(recoverDb)
-                .RecoverOrphansAsync(TimeSpan.FromMinutes(5), MaxAttempts, TestContext.Current.CancellationToken);
+            atCap = await CreateStore(recoverDb)
+                .RecoverOrphansAsync(TimeSpan.FromMinutes(5), MaxAttempts, [], TestContext.Current.CancellationToken);
         }
 
-        failed.Should().ContainSingle(r => r.Id == id);
+        atCap.Should().ContainSingle(r => r.Id == id);
 
         var reloaded = await ReloadAsync(id);
-        reloaded!.Status.Should().Be(ConversationTurnStatus.Failed);
+        reloaded!.Status.Should().Be(ConversationTurnStatus.Processing,
+            "the store returns at-cap candidates without mutating them; the caller flips the row Failed after recording the event");
+
+        // The caller then marks it Failed (mirrors the worker's event-then-flip path).
+        await using (var failDb = _factory.CreateDbContext())
+        {
+            await CreateStore(failDb).MarkFailedAsync(id, "interrupted", TestContext.Current.CancellationToken);
+        }
+
+        (await ReloadAsync(id))!.Status.Should().Be(ConversationTurnStatus.Failed);
+    }
+
+    [Fact]
+    public async Task RecoverOrphans_LocallyActiveConversation_NotResetEvenIfStale()
+    {
+        // A live long-running stream in THIS process: its ClaimedAt is stale but the
+        // conversation is in the active set, so orphan recovery must skip it entirely.
+        var conversationId = Guid.NewGuid();
+        var id = Guid.NewGuid();
+        await using (var db = _factory.CreateDbContext())
+        {
+            db.ConversationTurnRequests.Add(new ConversationTurnRequest
+            {
+                Id = id,
+                ConversationId = conversationId,
+                UserId = Guid.NewGuid(),
+                Model = "test/model",
+                Status = ConversationTurnStatus.Processing,
+                AttemptCount = 1,
+                CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-30),
+                ClaimedAt = DateTimeOffset.UtcNow.AddMinutes(-20), // stale
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await using (var recoverDb = _factory.CreateDbContext())
+        {
+            await CreateStore(recoverDb)
+                .RecoverOrphansAsync(TimeSpan.FromMinutes(5), MaxAttempts, [conversationId], TestContext.Current.CancellationToken);
+        }
+
+        var reloaded = await ReloadAsync(id);
+        reloaded!.Status.Should().Be(ConversationTurnStatus.Processing,
+            "the conversation is streaming locally, so lease expiry must not reset it");
     }
 
     [Fact]
@@ -268,7 +317,7 @@ public class ConversationTurnRequestStoreTests
         await using (var recoverDb = _factory.CreateDbContext())
         {
             await CreateStore(recoverDb)
-                .RecoverOrphansAsync(TimeSpan.FromMinutes(5), MaxAttempts, TestContext.Current.CancellationToken);
+                .RecoverOrphansAsync(TimeSpan.FromMinutes(5), MaxAttempts, [], TestContext.Current.CancellationToken);
         }
 
         var reloaded = await ReloadAsync(id);
@@ -278,21 +327,36 @@ public class ConversationTurnRequestStoreTests
     // ── Cancellation lookup ───────────────────────────────────────
 
     [Fact]
-    public async Task GetLatestActive_ReturnsPendingRow()
+    public async Task GetActive_ReturnsPendingRow()
     {
         var conversationId = Guid.NewGuid();
         var pending = await SeedPendingAsync(conversationId, DateTimeOffset.UtcNow);
 
         await using var db = _factory.CreateDbContext();
-        var active = await CreateStore(db).GetLatestActiveAsync(conversationId, TestContext.Current.CancellationToken);
+        var active = await CreateStore(db).GetActiveAsync(conversationId, TestContext.Current.CancellationToken);
 
-        active.Should().NotBeNull();
-        active!.Id.Should().Be(pending.Id);
-        active.Status.Should().Be(ConversationTurnStatus.Pending);
+        active.Should().ContainSingle();
+        active[0].Id.Should().Be(pending.Id);
+        active[0].Status.Should().Be(ConversationTurnStatus.Pending);
     }
 
     [Fact]
-    public async Task GetLatestActive_NoActiveTurn_ReturnsNull()
+    public async Task GetActive_ReturnsAllActiveRowsNewestFirst()
+    {
+        // "Stop generating" must be able to cancel EVERY active turn, so the store
+        // returns all Pending/Processing rows (newest first), not just the latest.
+        var conversationId = Guid.NewGuid();
+        var older = await SeedPendingAsync(conversationId, DateTimeOffset.UtcNow.AddSeconds(-10));
+        var newer = await SeedPendingAsync(conversationId, DateTimeOffset.UtcNow);
+
+        await using var db = _factory.CreateDbContext();
+        var active = await CreateStore(db).GetActiveAsync(conversationId, TestContext.Current.CancellationToken);
+
+        active.Select(r => r.Id).Should().Equal(newer.Id, older.Id);
+    }
+
+    [Fact]
+    public async Task GetActive_NoActiveTurn_ReturnsEmpty()
     {
         var conversationId = Guid.NewGuid();
         var processing = await SeedProcessingAsync(conversationId);
@@ -303,9 +367,9 @@ public class ConversationTurnRequestStoreTests
         }
 
         await using var db = _factory.CreateDbContext();
-        var active = await CreateStore(db).GetLatestActiveAsync(conversationId, TestContext.Current.CancellationToken);
+        var active = await CreateStore(db).GetActiveAsync(conversationId, TestContext.Current.CancellationToken);
 
-        active.Should().BeNull();
+        active.Should().BeEmpty();
     }
 
     // ── Terminal-state guards ─────────────────────────────────────

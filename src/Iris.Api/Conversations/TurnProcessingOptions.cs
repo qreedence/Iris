@@ -12,9 +12,12 @@ public class TurnProcessingOptions
 
     /// <summary>
     /// How long a Processing row may sit before it is considered orphaned (its
-    /// worker crashed / host was killed) and reset for retry.
+    /// worker crashed / host was killed) and reset for retry. Defense in depth for
+    /// genuinely long streams: orphan recovery already excludes conversations that
+    /// are actively streaming in THIS process (see IActiveTurnRegistry), so the lease
+    /// only governs rows whose owning process is gone.
     /// </summary>
-    public TimeSpan ClaimLease { get; set; } = TimeSpan.FromMinutes(5);
+    public TimeSpan ClaimLease { get; set; } = TimeSpan.FromMinutes(15);
 
     /// <summary>Maximum number of attempts before a turn is marked Failed.</summary>
     public int MaxAttempts { get; set; } = 2;

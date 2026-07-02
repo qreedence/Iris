@@ -46,8 +46,8 @@ public class CancelConversationTurnHandlerTests
     {
         var conversationId = Guid.NewGuid();
         _conversationQueries.ExistsForUserAsync(conversationId, Arg.Any<CancellationToken>()).Returns(true);
-        _turnRequestStore.GetLatestActiveAsync(conversationId, Arg.Any<CancellationToken>())
-            .Returns((ConversationTurnRequest?)null);
+        _turnRequestStore.GetActiveAsync(conversationId, Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<ConversationTurnRequest>());
         var sut = CreateSut();
 
         await sut.Handle(new CancelConversationTurnCommand { ConversationId = conversationId }, CancellationToken.None);
@@ -62,7 +62,8 @@ public class CancelConversationTurnHandlerTests
         var conversationId = Guid.NewGuid();
         var request = Request(conversationId, ConversationTurnStatus.Pending);
         _conversationQueries.ExistsForUserAsync(conversationId, Arg.Any<CancellationToken>()).Returns(true);
-        _turnRequestStore.GetLatestActiveAsync(conversationId, Arg.Any<CancellationToken>()).Returns(request);
+        _turnRequestStore.GetActiveAsync(conversationId, Arg.Any<CancellationToken>())
+            .Returns(new[] { request });
         var sut = CreateSut();
 
         await sut.Handle(new CancelConversationTurnCommand { ConversationId = conversationId }, CancellationToken.None);
@@ -77,7 +78,8 @@ public class CancelConversationTurnHandlerTests
         var conversationId = Guid.NewGuid();
         var request = Request(conversationId, ConversationTurnStatus.Processing);
         _conversationQueries.ExistsForUserAsync(conversationId, Arg.Any<CancellationToken>()).Returns(true);
-        _turnRequestStore.GetLatestActiveAsync(conversationId, Arg.Any<CancellationToken>()).Returns(request);
+        _turnRequestStore.GetActiveAsync(conversationId, Arg.Any<CancellationToken>())
+            .Returns(new[] { request });
         var sut = CreateSut();
 
         await sut.Handle(new CancelConversationTurnCommand { ConversationId = conversationId }, CancellationToken.None);

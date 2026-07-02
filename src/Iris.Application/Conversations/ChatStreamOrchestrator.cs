@@ -15,6 +15,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
     private readonly IChatProvider _chatProvider;
     private readonly IChatStreamNotifier _notifier;
     private readonly IConversationEventRecorder _eventRecorder;
+    private readonly IActiveTurnRegistry _activeTurns;
     private readonly ILogger<ChatStreamOrchestrator> _logger;
 
     public ChatStreamOrchestrator(
@@ -22,12 +23,14 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
         IChatProvider chatProvider,
         IChatStreamNotifier notifier,
         IConversationEventRecorder eventRecorder,
+        IActiveTurnRegistry activeTurns,
         ILogger<ChatStreamOrchestrator> logger)
     {
         _turnPreparer = turnPreparer;
         _chatProvider = chatProvider;
         _notifier = notifier;
         _eventRecorder = eventRecorder;
+        _activeTurns = activeTurns;
         _logger = logger;
     }
 
@@ -85,6 +88,21 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
         }
         catch (OperationCanceledException)
         {
+            // Distinguish a USER cancel ("stop generating", registry flag set) from a
+            // host-shutdown interrupt (linked token fired by stoppingToken). Only a
+            // user cancel is a terminal outcome worth recording as TurnCancelled; a
+            // shutdown interrupt must record NOTHING and rethrow so the worker leaves
+            // the row Processing for orphan recovery to resume after restart.
+            // Otherwise TurnCancelled would be seen as terminal and the retry skipped,
+            // permanently losing (and mislabeling) the turn.
+            if (!_activeTurns.WasUserCancelled(conversationId))
+            {
+                _logger.LogInformation(
+                    "Conversation stream for {ConversationId} interrupted (not a user cancel); rethrowing for orphan recovery",
+                    conversationId);
+                throw;
+            }
+
             var turnCancelled = new TurnCancelled(conversationId, GetPartialContent(content));
 
             await _eventRecorder.RecordAsync(

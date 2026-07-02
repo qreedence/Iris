@@ -17,6 +17,7 @@ public class ChatStreamOrchestratorTests
     private readonly IChatProvider _chatProvider = Substitute.For<IChatProvider>();
     private readonly IChatStreamNotifier _notifier = Substitute.For<IChatStreamNotifier>();
     private readonly IConversationEventRecorder _eventRecorder = Substitute.For<IConversationEventRecorder>();
+    private readonly IActiveTurnRegistry _activeTurns = Substitute.For<IActiveTurnRegistry>();
 
     private ChatStreamOrchestrator CreateSut()
     {
@@ -33,6 +34,7 @@ public class ChatStreamOrchestratorTests
             _chatProvider,
             _notifier,
             _eventRecorder,
+            _activeTurns,
             NullLogger<ChatStreamOrchestrator>.Instance);
     }
 
@@ -136,12 +138,15 @@ public class ChatStreamOrchestratorTests
     }
 
     [Fact]
-    public async Task StreamAsync_Cancellation_RecordsTurnCancelledWithPartialContent()
+    public async Task StreamAsync_UserCancellation_RecordsTurnCancelledWithPartialContent()
     {
         // Arrange
         var sut = CreateSut();
         var conversationId = Guid.NewGuid();
         SetupPreparedTurn(conversationId);
+
+        // The registry reports this cancellation was USER-initiated ("stop generating").
+        _activeTurns.WasUserCancelled(conversationId).Returns(true);
 
         _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
             .Returns(call => StreamThenThrow(
@@ -162,6 +167,36 @@ public class ChatStreamOrchestratorTests
             Arg.Any<Guid>(),
             Arg.Any<string>(),
             Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+        await _notifier.DidNotReceive().SendCompletedAsync(conversationId, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StreamAsync_NonUserCancellation_RecordsNothingAndRethrows()
+    {
+        // Arrange — a host-shutdown interrupt: the token fires but the registry does
+        // NOT report a user cancel (default substitute returns false).
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        SetupPreparedTurn(conversationId);
+
+        _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => StreamThenThrow(
+                new OperationCanceledException(),
+                call.ArgAt<CancellationToken>(1)));
+
+        // Act
+        var act = () => sut.StreamAsync(Guid.NewGuid(), conversationId, "test/model", false, null, TestContext.Current.CancellationToken);
+
+        // Assert — the OCE propagates so the worker leaves the row for orphan recovery.
+        await act.Should().ThrowAsync<OperationCanceledException>();
+
+        // No terminal event of any kind is recorded (not TurnCancelled, not TurnFailed).
+        await _eventRecorder.DidNotReceive().RecordAsync(
+            Arg.Any<Guid>(),
+            Arg.Is<IEnumerable<ConversationEvent>>(events =>
+                events.OfType<TurnCancelled>().Any() ||
+                events.OfType<TurnFailed>().Any()),
             Arg.Any<CancellationToken>());
         await _notifier.DidNotReceive().SendCompletedAsync(conversationId, Arg.Any<CancellationToken>());
     }

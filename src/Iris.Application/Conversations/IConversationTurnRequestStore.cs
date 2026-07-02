@@ -42,18 +42,23 @@ public interface IConversationTurnRequestStore
 
     /// <summary>
     /// Resets orphaned Processing rows (ClaimedAt older than <paramref name="claimLease"/>)
-    /// that are still under the attempt cap back to Pending. Returns the ids of
-    /// orphans that have reached the attempt cap and were marked Failed so the
-    /// caller can record the terminal TurnFailed event for each.
+    /// that are still under the attempt cap back to Pending. Conversations in
+    /// <paramref name="activeConversationIds"/> — those streaming in THIS process —
+    /// are excluded so a live long-running stream is never reset out from under
+    /// itself. Rows that have reached the attempt cap are NOT mutated here: they are
+    /// RETURNED so the caller can record the terminal TurnFailed event FIRST, then
+    /// mark the row Failed (event-before-row-flip ordering).
     /// </summary>
     Task<IReadOnlyList<ConversationTurnRequest>> RecoverOrphansAsync(
         TimeSpan claimLease,
         int maxAttempts,
+        IReadOnlyCollection<Guid> activeConversationIds,
         CancellationToken ct = default);
 
     /// <summary>
-    /// Returns the latest active (Pending or Processing) row for a conversation,
-    /// or null if none. Used by the cancellation endpoint.
+    /// Returns ALL active (Pending or Processing) rows for a conversation, newest
+    /// first. Used by the cancellation endpoint, which must cancel every active turn
+    /// (not just the newest) so "stop generating" never cancels the wrong turn.
     /// </summary>
-    Task<ConversationTurnRequest?> GetLatestActiveAsync(Guid conversationId, CancellationToken ct = default);
+    Task<IReadOnlyList<ConversationTurnRequest>> GetActiveAsync(Guid conversationId, CancellationToken ct = default);
 }
