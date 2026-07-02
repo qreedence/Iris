@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Iris.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260702101415_AddConversationTurnRequests")]
+    [Migration("20260702103955_AddConversationTurnRequests")]
     partial class AddConversationTurnRequests
     {
         /// <inheritdoc />
@@ -114,6 +114,9 @@ namespace Iris.Infrastructure.Migrations
 
                     b.Property<string>("LastError")
                         .HasColumnType("text");
+
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Model")
                         .IsRequired()

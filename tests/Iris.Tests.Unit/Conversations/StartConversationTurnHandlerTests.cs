@@ -125,6 +125,35 @@ public class StartConversationTurnHandlerTests
         callOrder.Should().Equal("AddPending", "RecordAsync");
     }
 
+    [Fact]
+    public async Task Handle_ValidCommand_LinksTurnRequestToItsMessageSentEvent()
+    {
+        // The worker's retry idempotency check depends on the row's MessageId
+        // pointing at the exact MessageSent event committed alongside it.
+        var conversationId = Guid.NewGuid();
+        SetupExistingConversation(conversationId);
+        var sut = CreateSut();
+        var command = CreateValidCommand(conversationId: conversationId);
+
+        ConversationTurnRequest? capturedRequest = null;
+        MessageSent? capturedMessage = null;
+        _turnRequestStore
+            .When(s => s.AddPending(Arg.Any<ConversationTurnRequest>()))
+            .Do(call => capturedRequest = call.Arg<ConversationTurnRequest>());
+        _eventRecorder
+            .When(r => r.RecordAsync(Arg.Any<Guid>(), Arg.Any<IEnumerable<ConversationEvent>>(), Arg.Any<CancellationToken>()))
+            .Do(call => capturedMessage = call.Arg<IEnumerable<ConversationEvent>>().OfType<MessageSent>().Single());
+
+        // Act
+        await sut.Handle(command, CancellationToken.None);
+
+        // Assert
+        capturedRequest.Should().NotBeNull();
+        capturedMessage.Should().NotBeNull();
+        capturedRequest!.MessageId.Should().Be(capturedMessage!.Id);
+        capturedRequest.MessageId.Should().NotBe(Guid.Empty);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

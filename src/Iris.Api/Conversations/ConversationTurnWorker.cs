@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations;
@@ -17,6 +18,7 @@ public class ConversationTurnWorker : BackgroundService
     private readonly ILogger<ConversationTurnWorker> _logger;
 
     private readonly SemaphoreSlim _concurrency;
+    private readonly ConcurrentDictionary<Guid, Task> _inFlight = new();
     private int _runningCount;
 
     public ConversationTurnWorker(
@@ -125,7 +127,38 @@ public class ConversationTurnWorker : BackgroundService
             Interlocked.Increment(ref _runningCount);
 
             // Fire-and-track: each turn runs on its own task with its own scope.
-            _ = Task.Run(() => DispatchAsync(request, stoppingToken), CancellationToken.None);
+            // Tracked in _inFlight so StopAsync can await in-flight turns before
+            // the host disposes the DI container.
+            var task = Task.Run(() => DispatchAsync(request, stoppingToken), CancellationToken.None);
+            _inFlight[request.Id] = task;
+
+            // Close the race where the dispatch finished (and its finally ran)
+            // before the dictionary insert above — drop the already-completed entry.
+            if (task.IsCompleted)
+                _inFlight.TryRemove(request.Id, out _);
+        }
+    }
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        // base.StopAsync cancels stoppingToken; every in-flight turn's linked CTS
+        // fires and the streams wind down. Then wait for the dispatch tasks to
+        // finish their cleanup so DI scope disposal cannot race them. The host's
+        // shutdown timeout bounds this wait.
+        await base.StopAsync(cancellationToken);
+
+        var inFlight = _inFlight.Values.ToArray();
+        if (inFlight.Length == 0)
+            return;
+
+        try
+        {
+            await Task.WhenAll(inFlight);
+        }
+        catch (Exception ex)
+        {
+            // Dispatch tasks handle their own failures; never let shutdown throw.
+            _logger.LogWarning(ex, "In-flight turn task faulted during shutdown");
         }
     }
 
@@ -144,7 +177,7 @@ public class ConversationTurnWorker : BackgroundService
             // stream but crashed before marking the row. Skip if a terminal event
             // already exists so we never double-spend tokens.
             if (request.AttemptCount > 1
-                && await TurnAlreadyTerminalAsync(scope.ServiceProvider, request.ConversationId, stoppingToken))
+                && await TurnAlreadyTerminalAsync(scope.ServiceProvider, request, stoppingToken))
             {
                 await UpdateStatusAsync(store => store.MarkCompletedAsync(request.Id, stoppingToken));
                 return;
@@ -189,6 +222,7 @@ public class ConversationTurnWorker : BackgroundService
         finally
         {
             _activeTurns.Remove(request.ConversationId);
+            _inFlight.TryRemove(request.Id, out _);
             Interlocked.Decrement(ref _runningCount);
             _concurrency.Release();
         }
@@ -279,26 +313,38 @@ public class ConversationTurnWorker : BackgroundService
 
     private async Task<bool> TurnAlreadyTerminalAsync(
         IServiceProvider provider,
-        Guid conversationId,
+        ConversationTurnRequest request,
         CancellationToken ct)
     {
         var eventStore = provider.GetRequiredService<IEventStore>();
-        var stream = await eventStore.LoadStreamAsync(conversationId, ct);
+        var stream = await eventStore.LoadStreamAsync(request.ConversationId, ct);
 
-        var lastUserMessageIndex = -1;
-        for (var i = stream.Count - 1; i >= 0; i--)
+        // Find THIS turn's MessageSent via the MessageId linkage — not merely the
+        // latest message. If a second turn was enqueued while this one sat crashed,
+        // keying off the last message would inspect the wrong turn.
+        var messageIndex = -1;
+        for (var i = 0; i < stream.Count; i++)
         {
-            if (stream[i] is MessageSent)
+            if (stream[i] is MessageSent m && m.Id == request.MessageId)
             {
-                lastUserMessageIndex = i;
+                messageIndex = i;
                 break;
             }
         }
 
-        if (lastUserMessageIndex < 0)
+        if (messageIndex < 0)
+        {
+            // Should be impossible: the row and its MessageSent commit atomically.
+            // Fail open — proceed with streaming rather than skipping the turn.
+            _logger.LogWarning(
+                "MessageSent {MessageId} for turn {TurnId} (conversation {ConversationId}) not found in the event stream; proceeding with streaming",
+                request.MessageId,
+                request.Id,
+                request.ConversationId);
             return false;
+        }
 
-        for (var i = lastUserMessageIndex + 1; i < stream.Count; i++)
+        for (var i = messageIndex + 1; i < stream.Count; i++)
         {
             if (stream[i] is TurnCompleted or TurnFailed or TurnCancelled)
                 return true;

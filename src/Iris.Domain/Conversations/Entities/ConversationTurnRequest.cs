@@ -5,6 +5,11 @@ namespace Iris.Domain.Conversations.Entities
         public Guid Id { get; set; }
         public Guid ConversationId { get; set; }
         public Guid UserId { get; set; }
+
+        // Id of the MessageSent event this turn belongs to, committed atomically
+        // with that event. The worker's retry idempotency check uses it to find
+        // THIS turn's message in the stream (not merely the latest one).
+        public Guid MessageId { get; set; }
         public string Model { get; set; } = string.Empty;
         public bool ChangeModel { get; set; }
 

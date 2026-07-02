@@ -40,6 +40,31 @@ public class ConversationTurnRequestStoreTests : IClassFixture<IntegrationTestFa
         return request;
     }
 
+    /// <summary>
+    /// Seeds a row directly in Processing (as if freshly claimed). Used by the
+    /// terminal-guard tests so they don't depend on ClaimPendingAsync, whose
+    /// table-wide claim could pick up leftover Pending rows from other tests.
+    /// </summary>
+    private async Task<ConversationTurnRequest> SeedProcessingAsync(Guid conversationId)
+    {
+        var request = new ConversationTurnRequest
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = conversationId,
+            UserId = Guid.NewGuid(),
+            Model = "test/model",
+            Status = ConversationTurnStatus.Processing,
+            AttemptCount = 1,
+            CreatedAt = DateTimeOffset.UtcNow,
+            ClaimedAt = DateTimeOffset.UtcNow,
+        };
+
+        await using var db = _factory.CreateDbContext();
+        db.ConversationTurnRequests.Add(request);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return request;
+    }
+
     private EfConversationTurnRequestStore CreateStore(AppDbContext db) => new(db);
 
     private async Task<ConversationTurnRequest?> ReloadAsync(Guid id)
@@ -269,15 +294,81 @@ public class ConversationTurnRequestStoreTests : IClassFixture<IntegrationTestFa
     public async Task GetLatestActive_NoActiveTurn_ReturnsNull()
     {
         var conversationId = Guid.NewGuid();
-        var pending = await SeedPendingAsync(conversationId, DateTimeOffset.UtcNow);
+        var processing = await SeedProcessingAsync(conversationId);
+
         await using (var completeDb = _factory.CreateDbContext())
         {
-            await CreateStore(completeDb).MarkCompletedAsync(pending.Id, TestContext.Current.CancellationToken);
+            await CreateStore(completeDb).MarkCompletedAsync(processing.Id, TestContext.Current.CancellationToken);
         }
 
         await using var db = _factory.CreateDbContext();
         var active = await CreateStore(db).GetLatestActiveAsync(conversationId, TestContext.Current.CancellationToken);
 
         active.Should().BeNull();
+    }
+
+    // ── Terminal-state guards ─────────────────────────────────────
+
+    [Fact]
+    public async Task MarkCancelled_AfterCompleted_RowStaysCompleted()
+    {
+        // Race: a user cancel lands just as the stream completes. Terminal states
+        // must not overwrite each other — the first terminal writer wins.
+        var conversationId = Guid.NewGuid();
+        var request = await SeedProcessingAsync(conversationId);
+
+        await using (var completeDb = _factory.CreateDbContext())
+        {
+            await CreateStore(completeDb).MarkCompletedAsync(request.Id, TestContext.Current.CancellationToken);
+        }
+
+        await using (var cancelDb = _factory.CreateDbContext())
+        {
+            await CreateStore(cancelDb).MarkCancelledAsync(request.Id, TestContext.Current.CancellationToken);
+        }
+
+        var reloaded = await ReloadAsync(request.Id);
+        reloaded!.Status.Should().Be(ConversationTurnStatus.Completed,
+            "a terminal Completed row must not be overwritten by a late cancel");
+    }
+
+    [Fact]
+    public async Task MarkCompleted_AfterCancelled_RowStaysCancelled()
+    {
+        // The mirror race: the cancel endpoint wins, then the worker's completion
+        // path fires. The zero-row update must be silently ignored.
+        var conversationId = Guid.NewGuid();
+        var request = await SeedProcessingAsync(conversationId);
+
+        await using (var cancelDb = _factory.CreateDbContext())
+        {
+            await CreateStore(cancelDb).MarkCancelledAsync(request.Id, TestContext.Current.CancellationToken);
+        }
+
+        await using (var completeDb = _factory.CreateDbContext())
+        {
+            await CreateStore(completeDb).MarkCompletedAsync(request.Id, TestContext.Current.CancellationToken);
+        }
+
+        var reloaded = await ReloadAsync(request.Id);
+        reloaded!.Status.Should().Be(ConversationTurnStatus.Cancelled,
+            "a terminal Cancelled row must not be overwritten by a late completion");
+    }
+
+    [Fact]
+    public async Task MarkCancelled_PendingRow_StillWorks()
+    {
+        // The cancel-before-claim flavour: MarkCancelledAsync's guard must allow
+        // Pending as well as Processing.
+        var conversationId = Guid.NewGuid();
+        var request = await SeedPendingAsync(conversationId, DateTimeOffset.UtcNow);
+
+        await using (var cancelDb = _factory.CreateDbContext())
+        {
+            await CreateStore(cancelDb).MarkCancelledAsync(request.Id, TestContext.Current.CancellationToken);
+        }
+
+        var reloaded = await ReloadAsync(request.Id);
+        reloaded!.Status.Should().Be(ConversationTurnStatus.Cancelled);
     }
 }

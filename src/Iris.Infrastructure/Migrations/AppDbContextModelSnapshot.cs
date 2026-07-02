@@ -112,6 +112,9 @@ namespace Iris.Infrastructure.Migrations
                     b.Property<string>("LastError")
                         .HasColumnType("text");
 
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Model")
                         .IsRequired()
                         .HasColumnType("text");

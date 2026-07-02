@@ -61,6 +61,9 @@ public class StartConversationTurnHandler : IRequestHandler<StartConversationTur
             Id = Guid.NewGuid(),
             ConversationId = command.ConversationId,
             UserId = command.UserId,
+            // Links the row to ITS MessageSent event so the worker's retry
+            // idempotency check inspects this exact turn, not just the latest one.
+            MessageId = message.Id,
             Model = command.Model,
             ChangeModel = command.ChangeModel,
             ModelParameters = command.ModelParameters is null

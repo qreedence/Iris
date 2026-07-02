@@ -86,10 +86,15 @@ public class EfConversationTurnRequestStore : IConversationTurnRequestStore
         return rows;
     }
 
+    // Terminal-state writes below are guarded on the current Status so two racing
+    // terminal writers (e.g. a user cancel landing just as the stream completes)
+    // cannot overwrite each other: the first one wins, the loser's ExecuteUpdate
+    // matches zero rows and is silently ignored.
+
     public async Task MarkCompletedAsync(Guid id, CancellationToken ct = default)
     {
         await _db.ConversationTurnRequests
-            .Where(r => r.Id == id)
+            .Where(r => r.Id == id && r.Status == ConversationTurnStatus.Processing)
             .ExecuteUpdateAsync(
                 s => s
                     .SetProperty(r => r.Status, ConversationTurnStatus.Completed)
@@ -99,8 +104,12 @@ public class EfConversationTurnRequestStore : IConversationTurnRequestStore
 
     public async Task MarkCancelledAsync(Guid id, CancellationToken ct = default)
     {
+        // Pending is allowed too: the cancel-before-claim flavour cancels a row the
+        // worker has never touched.
         await _db.ConversationTurnRequests
-            .Where(r => r.Id == id)
+            .Where(r => r.Id == id
+                        && (r.Status == ConversationTurnStatus.Pending
+                            || r.Status == ConversationTurnStatus.Processing))
             .ExecuteUpdateAsync(
                 s => s
                     .SetProperty(r => r.Status, ConversationTurnStatus.Cancelled)
@@ -111,7 +120,7 @@ public class EfConversationTurnRequestStore : IConversationTurnRequestStore
     public async Task ResetToPendingAsync(Guid id, string? lastError, CancellationToken ct = default)
     {
         await _db.ConversationTurnRequests
-            .Where(r => r.Id == id)
+            .Where(r => r.Id == id && r.Status == ConversationTurnStatus.Processing)
             .ExecuteUpdateAsync(
                 s => s
                     .SetProperty(r => r.Status, ConversationTurnStatus.Pending)
@@ -123,7 +132,7 @@ public class EfConversationTurnRequestStore : IConversationTurnRequestStore
     public async Task MarkFailedAsync(Guid id, string? lastError, CancellationToken ct = default)
     {
         await _db.ConversationTurnRequests
-            .Where(r => r.Id == id)
+            .Where(r => r.Id == id && r.Status == ConversationTurnStatus.Processing)
             .ExecuteUpdateAsync(
                 s => s
                     .SetProperty(r => r.Status, ConversationTurnStatus.Failed)

@@ -185,6 +185,110 @@ public class ConversationTurnWorkerTests : IClassFixture<ApiTestFactory>
         stream.OfType<TurnFailed>().Should().ContainSingle(e => e.ErrorCode == "interrupted");
     }
 
+    // ── Retry idempotency via MessageId linkage ───────────────────
+
+    [Fact]
+    public async Task CrashedTurnWithLaterTurnQueued_RetryUsesItsOwnMessage_NoDoubleStream()
+    {
+        // Scenario: turn 1 completed its stream but the worker crashed before
+        // marking the row (stale Processing). While it sat crashed, turn 2 was
+        // enqueued (Pending). On retry, turn 1's idempotency check must key off
+        // ITS OWN MessageSent (via the MessageId linkage) — not the latest message
+        // in the stream, which now belongs to turn 2. Correct behaviour: turn 1 is
+        // marked Completed WITHOUT re-streaming (no token double-spend); turn 2
+        // then streams normally. Exactly ONE provider call for this conversation.
+        var marker1 = $"idem-turn1-{Guid.NewGuid()}";
+        var marker2 = $"idem-turn2-{Guid.NewGuid()}";
+        var providerCalls = 0;
+
+        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var request = call.Arg<ChatRequest>();
+                var ct = call.ArgAt<CancellationToken>(1);
+                if (request.Messages.Any(m => m.Content == marker1))
+                    Interlocked.Increment(ref providerCalls);
+                return DefaultStream(ct);
+            });
+
+        var conversationId = await CreateConversationAsync();
+
+        // Seed the event stream: turn 1's message + its full terminal outcome
+        // (the stream finished), then turn 2's message (enqueued during the crash).
+        var message1Id = Guid.NewGuid();
+        var message2Id = Guid.NewGuid();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+            userService.OverrideUserId = _userId;
+            var recorder = scope.ServiceProvider.GetRequiredService<IConversationEventRecorder>();
+            await recorder.RecordAsync(
+                conversationId,
+                [
+                    new MessageSent(message1Id, conversationId, marker1, Iris.Domain.AiIntegration.ChatRole.User),
+                    new AssistantResponseCompleted(Guid.NewGuid(), conversationId, "turn 1 response", "test/model"),
+                    new TurnCompleted(conversationId, 1, 1),
+                    new MessageSent(message2Id, conversationId, marker2, Iris.Domain.AiIntegration.ChatRole.User),
+                ],
+                TestContext.Current.CancellationToken);
+        }
+
+        // Seed the rows: turn 1 as a stale Processing orphan at attempt 1 (crashed
+        // after its stream completed but before the row was marked), turn 2 Pending.
+        var turn1Id = Guid.NewGuid();
+        var turn2Id = Guid.NewGuid();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.ConversationTurnRequests.Add(new ConversationTurnRequest
+            {
+                Id = turn1Id,
+                ConversationId = conversationId,
+                UserId = _userId,
+                MessageId = message1Id,
+                Model = "test/model",
+                Status = ConversationTurnStatus.Processing,
+                AttemptCount = 1,
+                CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-30),
+                ClaimedAt = DateTimeOffset.UtcNow.AddMinutes(-20), // stale → orphan
+            });
+            db.ConversationTurnRequests.Add(new ConversationTurnRequest
+            {
+                Id = turn2Id,
+                ConversationId = conversationId,
+                UserId = _userId,
+                MessageId = message2Id,
+                Model = "test/model",
+                Status = ConversationTurnStatus.Pending,
+                AttemptCount = 0,
+                CreatedAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        // Worker: orphan-recovers turn 1 → Pending, reclaims it (attempt 2) →
+        // idempotency check finds turn 1's OWN terminal event → Completed, no
+        // stream. Then turn 2 becomes claimable and streams.
+        await WaitUntilAsync(async () =>
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var rows = await db.ConversationTurnRequests
+                .AsNoTracking()
+                .Where(r => r.ConversationId == conversationId)
+                .ToListAsync(TestContext.Current.CancellationToken);
+            return rows.Count == 2 && rows.All(r => r.Status == ConversationTurnStatus.Completed);
+        }, TimeSpan.FromSeconds(20));
+
+        providerCalls.Should().Be(1,
+            "turn 1's retry must skip streaming (its own terminal event exists); only turn 2 streams");
+
+        // The stream gained exactly one more terminal pair (turn 2's) — turn 1 was
+        // not re-streamed.
+        var stream = await LoadStreamAsync(conversationId);
+        stream.OfType<TurnCompleted>().Should().HaveCount(2);
+    }
+
     // ── Cancellation: Pending flavour (4.4) ───────────────────────
 
     [Fact]

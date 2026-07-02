@@ -18,6 +18,7 @@ namespace Iris.Infrastructure.Migrations
                     Id = table.Column<Guid>(type: "uuid", nullable: false),
                     ConversationId = table.Column<Guid>(type: "uuid", nullable: false),
                     UserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    MessageId = table.Column<Guid>(type: "uuid", nullable: false),
                     Model = table.Column<string>(type: "text", nullable: false),
                     ChangeModel = table.Column<bool>(type: "boolean", nullable: false),
                     ModelParameters = table.Column<string>(type: "jsonb", nullable: true),
