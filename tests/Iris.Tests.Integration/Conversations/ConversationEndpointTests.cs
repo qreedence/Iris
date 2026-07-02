@@ -14,7 +14,8 @@ using MediatR;
 
 namespace Iris.Tests.Integration.Conversations;
 
-public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
+[Collection("ApiTestFactory collection")]
+public class ConversationEndpointTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

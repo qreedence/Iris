@@ -8,7 +8,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Iris.Tests.Integration.Auth;
 
-public class AuthServiceAccountLinkingTests : IClassFixture<ApiTestFactory>
+[Collection("ApiTestFactory collection")]
+public class AuthServiceAccountLinkingTests
 {
     private readonly ApiTestFactory _factory;
 

@@ -10,7 +10,8 @@ namespace Iris.Tests.Integration.Persistence;
 /// it lives alongside the other direct-DbContext persistence tests rather than in the
 /// Persona endpoint test files.
 /// </summary>
-public class SystemPromptModelMappingTests : IClassFixture<ApiTestFactory>
+[Collection("ApiTestFactory collection")]
+public class SystemPromptModelMappingTests
 {
     private readonly ApiTestFactory _factory;
 

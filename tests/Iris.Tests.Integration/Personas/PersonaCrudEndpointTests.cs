@@ -11,7 +11,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Iris.Tests.Integration.Personas;
 
-public class PersonaCrudEndpointTests : IClassFixture<ApiTestFactory>
+[Collection("ApiTestFactory collection")]
+public class PersonaCrudEndpointTests
 {
     private readonly ApiTestFactory _factory;
     private readonly Guid _userId = Guid.NewGuid();

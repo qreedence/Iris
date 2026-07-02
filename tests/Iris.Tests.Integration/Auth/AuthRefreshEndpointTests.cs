@@ -10,7 +10,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Iris.Tests.Integration.Auth;
 
-public class AuthRefreshEndpointTests : IClassFixture<ApiTestFactory>
+[Collection("ApiTestFactory collection")]
+public class AuthRefreshEndpointTests
 {
     private readonly ApiTestFactory _factory;
 

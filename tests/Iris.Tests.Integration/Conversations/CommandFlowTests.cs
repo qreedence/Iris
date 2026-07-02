@@ -10,7 +10,8 @@ using MediatR;
 
 namespace Iris.Tests.Integration.Conversations;
 
-public class CommandFlowTests : IClassFixture<IntegrationTestFactory>
+[Collection("IntegrationTestFactory collection")]
+public class CommandFlowTests
 {
     private readonly IntegrationTestFactory _factory;
 

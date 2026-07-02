@@ -21,9 +21,18 @@ public static class ChatProviderMock
     {
         var mock = Substitute.For<IChatProvider>();
         mock.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
-            .Returns(call => StreamResponse("Mock AI response", call.ArgAt<CancellationToken>(1)));
+            .Returns(call => DefaultStream(call.ArgAt<CancellationToken>(1)));
         return mock;
     }
+
+    /// <summary>
+    /// The default "Mock AI response" stream, exposed directly so tests that
+    /// selectively override StreamAsync on the shared mock (matching on a marker) can
+    /// fall through to this for every other request instead of re-wrapping a fresh
+    /// substitute just to reach the same stub.
+    /// </summary>
+    public static IAsyncEnumerable<StreamedChunk> DefaultStream(CancellationToken ct = default) =>
+        StreamResponse("Mock AI response", ct);
 
     private static async IAsyncEnumerable<StreamedChunk> StreamResponse(
         string content,

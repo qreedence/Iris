@@ -7,7 +7,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Iris.Tests.Integration.Conversations;
 
-public class ProjectorTests : IClassFixture<IntegrationTestFactory>
+[Collection("IntegrationTestFactory collection")]
+public class ProjectorTests
 {
     private readonly IntegrationTestFactory _factory;
     private readonly Guid _userId = Guid.NewGuid();

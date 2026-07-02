@@ -9,7 +9,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Iris.Tests.Integration.Personas;
 
-public class PersonaSystemPromptEndpointTests : IClassFixture<ApiTestFactory>
+[Collection("ApiTestFactory collection")]
+public class PersonaSystemPromptEndpointTests
 {
     private readonly ApiTestFactory _factory;
     private readonly Guid _userId = Guid.NewGuid();

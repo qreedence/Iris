@@ -11,7 +11,8 @@ namespace Iris.Tests.Integration.Conversations;
 /// and cancellation semantics against a real Postgres, using raw DbContexts so the
 /// behaviour is deterministic (no dependence on the background worker's timing).
 /// </summary>
-public class ConversationTurnRequestStoreTests : IClassFixture<IntegrationTestFactory>
+[Collection("IntegrationTestFactory collection")]
+public class ConversationTurnRequestStoreTests
 {
     private const int MaxAttempts = 2;
 

@@ -17,7 +17,8 @@ namespace Iris.Tests.Integration.Conversations;
 /// Cross-tenant isolation tests proving that service-layer queries,
 /// event store access, and read models respect user boundaries.
 /// </summary>
-public class TenantIsolationTests : IClassFixture<ApiTestFactory>
+[Collection("ApiTestFactory collection")]
+public class TenantIsolationTests
 {
     private readonly ApiTestFactory _factory;
     private readonly Guid _userA = Guid.NewGuid();

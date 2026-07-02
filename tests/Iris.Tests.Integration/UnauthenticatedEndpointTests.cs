@@ -12,7 +12,8 @@ namespace Iris.Tests.Integration;
 /// ConversationsController — including routes that never had 401 coverage before
 /// (persona GetById, system-prompt section PUT/DELETE, and the /chat/cancel endpoint).
 /// </summary>
-public class UnauthenticatedEndpointTests : IClassFixture<ApiTestFactory>
+[Collection("ApiTestFactory collection")]
+public class UnauthenticatedEndpointTests
 {
     private readonly ApiTestFactory _factory;
 

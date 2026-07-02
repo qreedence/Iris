@@ -6,7 +6,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Iris.Tests.Integration.Conversations;
 
-public class EventStoreTests : IClassFixture<IntegrationTestFactory>
+[Collection("IntegrationTestFactory collection")]
+public class EventStoreTests
 {
     private readonly IntegrationTestFactory _factory;
 

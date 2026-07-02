@@ -10,7 +10,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Iris.Tests.Integration.Hubs;
 
-public class ChatHubStreamingIsolationTests : IClassFixture<ApiTestFactory>
+[Collection("ApiTestFactory collection")]
+public class ChatHubStreamingIsolationTests
 {
     private readonly ApiTestFactory _factory;
     private readonly Guid _userA = Guid.NewGuid();

@@ -7,7 +7,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Iris.Tests.Integration.Auth;
 
-public class AuthLogoutEndpointTests : IClassFixture<ApiTestFactory>
+[Collection("ApiTestFactory collection")]
+public class AuthLogoutEndpointTests
 {
     private readonly ApiTestFactory _factory;
 

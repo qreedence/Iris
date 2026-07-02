@@ -3,7 +3,8 @@ using FluentAssertions;
 
 namespace Iris.Tests.Integration.Hubs;
 
-public class ChatHubAuthTests : IClassFixture<ApiTestFactory>
+[Collection("ApiTestFactory collection")]
+public class ChatHubAuthTests
 {
     private readonly ApiTestFactory _factory;
 

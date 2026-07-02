@@ -24,7 +24,8 @@ namespace Iris.Tests.Integration.Conversations;
 /// concurrency overlap, attempt-cap failure, and per-turn cancellation (both the
 /// Pending and Processing flavours).
 /// </summary>
-public class ConversationTurnWorkerTests : IClassFixture<ApiTestFactory>
+[Collection("ApiTestFactory collection")]
+public class ConversationTurnWorkerTests
 {
     private readonly ApiTestFactory _factory;
     private readonly Guid _userId = Guid.NewGuid();

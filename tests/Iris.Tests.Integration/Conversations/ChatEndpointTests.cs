@@ -17,7 +17,8 @@ using NSubstitute;
 
 namespace Iris.Tests.Integration.Conversations;
 
-public class ChatEndpointTests : IClassFixture<ApiTestFactory>
+[Collection("ApiTestFactory collection")]
+public class ChatEndpointTests
 {
     private readonly Guid _userId = Guid.NewGuid();
     private readonly HttpClient _client;
@@ -143,13 +144,14 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
     [Fact]
     public async Task PostChat_MultiTurn_AiReceivesHistory()
     {
-        // Arrange
+        // Arrange — unique markers so this test's capture only fires for its own
+        // requests; the shared MockChatProvider now spans every test in the
+        // ApiTestFactory collection, so an unfiltered Arg.Any<ChatRequest>() override
+        // would otherwise leak into concurrently/subsequently run tests.
+        var marker1 = $"First question {Guid.NewGuid()}";
+        var marker2 = $"Follow-up {Guid.NewGuid()}";
         ChatRequest? capturedRequest = null;
-        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
-            .Returns(call => CaptureAndStreamResponse(
-                call.Arg<ChatRequest>(),
-                request => capturedRequest = request,
-                call.ArgAt<CancellationToken>(1)));
+        InstallCapturingStream(request => capturedRequest = request, marker1, marker2);
 
         var persona = await CreatePersonaAsync();
         var conversationId = Guid.NewGuid();
@@ -158,36 +160,32 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         // Turn 1
         await _client.PostAsJsonAsync(
             $"/api/conversations/{conversationId}/chat",
-            CreateChatRequest("First question"),
+            CreateChatRequest(marker1),
             TestContext.Current.CancellationToken);
 
-        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == "First question");
+        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == marker1);
 
         // Act - Turn 2
         await _client.PostAsJsonAsync(
             $"/api/conversations/{conversationId}/chat",
-            CreateChatRequest("Follow-up"),
+            CreateChatRequest(marker2),
             TestContext.Current.CancellationToken);
 
         // Assert - latest stream should include both user messages in chronological order.
-        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == "Follow-up");
+        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == marker2);
         capturedRequest.Should().NotBeNull();
-        capturedRequest!.Messages[0].Content.Should().Be("First question");
-        capturedRequest.Messages[^1].Content.Should().Be("Follow-up");
+        capturedRequest!.Messages[0].Content.Should().Be(marker1);
+        capturedRequest.Messages[^1].Content.Should().Be(marker2);
     }
 
     [Fact]
     public async Task PostChat_PersonaWithSystemPrompt_ProviderReceivesAssembledPrompt()
     {
         // Arrange
-        ChatRequest? capturedRequest = null;
-        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
-            .Returns(call => CaptureAndStreamResponse(
-                call.Arg<ChatRequest>(),
-                request => capturedRequest = request,
-                call.ArgAt<CancellationToken>(1)));
-
         var userMessage = $"prompt-test-{Guid.NewGuid()}";
+        ChatRequest? capturedRequest = null;
+        InstallCapturingStream(request => capturedRequest = request, userMessage);
+
         var persona = await CreatePersonaAsync(systemPrompt: new SystemPromptSectionsRequest(
             Identity: "Answer as Iris.",
             Voice: "Warm and concise."));
@@ -222,14 +220,10 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
     public async Task PostChat_PersonaWithModelPreference_ProviderUsesPreferenceWhenRequestMatches()
     {
         // Arrange — frontend sends the persona's preferred model (user hasn't switched)
-        ChatRequest? capturedRequest = null;
-        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
-            .Returns(call => CaptureAndStreamResponse(
-                call.Arg<ChatRequest>(),
-                request => capturedRequest = request,
-                call.ArgAt<CancellationToken>(1)));
-
         var userMessage = $"model-preference-test-{Guid.NewGuid()}";
+        ChatRequest? capturedRequest = null;
+        InstallCapturingStream(request => capturedRequest = request, userMessage);
+
         var persona = await CreatePersonaAsync(modelPreference: "persona/model");
         var conversationId = Guid.NewGuid();
         await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
@@ -250,14 +244,10 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
     public async Task PostChat_PersonaWithModelPreferenceAndChangeModelFalse_ProviderUsesPreferenceWhenRequestDiffers()
     {
         // Arrange — frontend sends fallback model, but does not request a model change.
-        ChatRequest? capturedRequest = null;
-        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
-            .Returns(call => CaptureAndStreamResponse(
-                call.Arg<ChatRequest>(),
-                request => capturedRequest = request,
-                call.ArgAt<CancellationToken>(1)));
-
         var userMessage = $"model-preference-fallback-test-{Guid.NewGuid()}";
+        ChatRequest? capturedRequest = null;
+        InstallCapturingStream(request => capturedRequest = request, userMessage);
+
         var persona = await CreatePersonaAsync(modelPreference: "persona/model");
         var conversationId = Guid.NewGuid();
         await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
@@ -278,14 +268,10 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
     public async Task PostChat_ChangeModelTrue_ProviderUsesRequestedModel()
     {
         // Arrange
-        ChatRequest? capturedRequest = null;
-        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
-            .Returns(call => CaptureAndStreamResponse(
-                call.Arg<ChatRequest>(),
-                request => capturedRequest = request,
-                call.ArgAt<CancellationToken>(1)));
-
         var userMessage = $"model-change-test-{Guid.NewGuid()}";
+        ChatRequest? capturedRequest = null;
+        InstallCapturingStream(request => capturedRequest = request, userMessage);
+
         var persona = await CreatePersonaAsync(modelPreference: "persona/model");
         var conversationId = Guid.NewGuid();
         await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
@@ -306,14 +292,10 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
     public async Task PostChat_PersonaWithoutModelPreference_ProviderUsesFallbackModel()
     {
         // Arrange
-        ChatRequest? capturedRequest = null;
-        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
-            .Returns(call => CaptureAndStreamResponse(
-                call.Arg<ChatRequest>(),
-                request => capturedRequest = request,
-                call.ArgAt<CancellationToken>(1)));
-
         var userMessage = $"fallback-model-test-{Guid.NewGuid()}";
+        ChatRequest? capturedRequest = null;
+        InstallCapturingStream(request => capturedRequest = request, userMessage);
+
         var persona = await CreatePersonaAsync();
         var conversationId = Guid.NewGuid();
         await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
@@ -328,6 +310,27 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
         await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == userMessage);
         capturedRequest!.Model.Should().Be("fallback/model");
+    }
+
+    /// <summary>
+    /// Installs a StreamAsync override on the shared MockChatProvider that only
+    /// captures/streams for requests whose latest user message matches one of this
+    /// test's own unique markers — everything else falls through to the provider's
+    /// unmodified default stub. The mock is now shared across the whole
+    /// ApiTestFactory collection (Phase 5), so an unmarked Arg.Any() override would
+    /// otherwise leak into concurrently/subsequently run tests in other classes.
+    /// </summary>
+    private void InstallCapturingStream(Action<ChatRequest> capture, params string[] markers)
+    {
+        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var request = call.Arg<ChatRequest>();
+                var ct = call.ArgAt<CancellationToken>(1);
+                if (markers.Contains(request.Messages.LastOrDefault()?.Content))
+                    return CaptureAndStreamResponse(request, capture, ct);
+                return ChatProviderMock.DefaultStream(ct);
+            });
     }
 
     private static async IAsyncEnumerable<StreamedChunk> CaptureAndStreamResponse(

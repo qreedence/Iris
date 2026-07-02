@@ -22,7 +22,8 @@ namespace Iris.Tests.Integration.Persistence;
 /// HasQueryFilter calls in AppDbContext, the first assertion in the
 /// corresponding test starts failing loudly.
 /// </summary>
-public class TenantQueryFilterGuardTests : IClassFixture<ApiTestFactory>
+[Collection("ApiTestFactory collection")]
+public class TenantQueryFilterGuardTests
 {
     private readonly ApiTestFactory _factory;
     private readonly Guid _userA = Guid.NewGuid();
