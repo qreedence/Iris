@@ -27,7 +27,7 @@ public static class SystemPromptSectionParser
         }
     }
 
-    private static string Normalize(string value)
+    internal static string Normalize(string value)
     {
         return value
             .Trim()

@@ -4,6 +4,9 @@ namespace Iris.Api.Authentication
 {
     public class AuthCookieService
     {
+        public const string AccessTokenCookieName = "access_token";
+        public const string RefreshTokenCookieName = "refresh_token";
+
         private readonly IWebHostEnvironment _environment;
 
         public AuthCookieService(IWebHostEnvironment environment)
@@ -13,14 +16,14 @@ namespace Iris.Api.Authentication
 
         public void SetAuthCookies(HttpResponse response, AuthTokenResult tokens)
         {
-            response.Cookies.Append("access_token", tokens.AccessToken, BuildCookieOptions(tokens.AccessTokenExpiresAt));
-            response.Cookies.Append("refresh_token", tokens.RefreshToken, BuildCookieOptions(tokens.RefreshTokenExpiresAt));
+            response.Cookies.Append(AccessTokenCookieName, tokens.AccessToken, BuildCookieOptions(tokens.AccessTokenExpiresAt));
+            response.Cookies.Append(RefreshTokenCookieName, tokens.RefreshToken, BuildCookieOptions(tokens.RefreshTokenExpiresAt));
         }
 
         public void ClearAuthCookies(HttpResponse response)
         {
-            response.Cookies.Delete("access_token", BuildDeleteCookieOptions());
-            response.Cookies.Delete("refresh_token", BuildDeleteCookieOptions());
+            response.Cookies.Delete(AccessTokenCookieName, BuildDeleteCookieOptions());
+            response.Cookies.Delete(RefreshTokenCookieName, BuildDeleteCookieOptions());
         }
 
         private CookieOptions BuildCookieOptions(DateTimeOffset expiresAt)

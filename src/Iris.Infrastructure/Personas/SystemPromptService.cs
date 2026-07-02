@@ -37,11 +37,11 @@ public class SystemPromptService : ISystemPromptService
 
         var systemPrompt = await LoadSystemPromptAsync(userId, personaId, ct);
 
-        systemPrompt.Identity = NormalizeSection(request.Identity);
-        systemPrompt.Voice = NormalizeSection(request.Voice);
-        systemPrompt.Role = NormalizeSection(request.Role);
-        systemPrompt.Relationship = NormalizeSection(request.Relationship);
-        systemPrompt.ToolInstructions = NormalizeSection(request.ToolInstructions);
+        systemPrompt.Identity = SystemPromptSectionContent.Normalize(request.Identity);
+        systemPrompt.Voice = SystemPromptSectionContent.Normalize(request.Voice);
+        systemPrompt.Role = SystemPromptSectionContent.Normalize(request.Role);
+        systemPrompt.Relationship = SystemPromptSectionContent.Normalize(request.Relationship);
+        systemPrompt.ToolInstructions = SystemPromptSectionContent.Normalize(request.ToolInstructions);
         systemPrompt.UpdatedAt = DateTimeOffset.UtcNow;
 
         await _db.SaveChangesAsync(ct);
@@ -62,7 +62,7 @@ public class SystemPromptService : ISystemPromptService
         CancellationToken ct = default)
     {
         var systemPrompt = await LoadSystemPromptAsync(userId, personaId, ct);
-        var normalizedContent = NormalizeSection(content);
+        var normalizedContent = SystemPromptSectionContent.Normalize(content);
 
         switch (section)
         {
@@ -127,10 +127,5 @@ public class SystemPromptService : ISystemPromptService
             systemPrompt.Role,
             systemPrompt.Relationship,
             systemPrompt.ToolInstructions);
-    }
-
-    private static string? NormalizeSection(string? content)
-    {
-        return string.IsNullOrWhiteSpace(content) ? null : content.Trim();
     }
 }

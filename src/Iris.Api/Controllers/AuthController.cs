@@ -62,7 +62,7 @@ namespace Iris.Api.Controllers
         [HttpPost("refresh")]
         public async Task<IActionResult> Refresh(CancellationToken ct)
         {
-            var refreshToken = Request.Cookies["refresh_token"];
+            var refreshToken = Request.Cookies[AuthCookieService.RefreshTokenCookieName];
 
             if (string.IsNullOrWhiteSpace(refreshToken))
                 throw new UnauthorizedException("Invalid refresh token");
@@ -76,7 +76,7 @@ namespace Iris.Api.Controllers
         [HttpPost("logout")]
         public async Task<IActionResult> Logout(CancellationToken ct)
         {
-            var refreshToken = Request.Cookies["refresh_token"];
+            var refreshToken = Request.Cookies[AuthCookieService.RefreshTokenCookieName];
 
             if (!string.IsNullOrWhiteSpace(refreshToken))
                 await _authService.LogoutAsync(refreshToken, ct);

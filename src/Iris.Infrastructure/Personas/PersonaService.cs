@@ -165,18 +165,13 @@ public class PersonaService : IPersonaService
     {
         return new SystemPrompt
         {
-            Identity = NormalizeSection(request?.Identity),
-            Voice = NormalizeSection(request?.Voice),
-            Role = NormalizeSection(request?.Role),
-            Relationship = NormalizeSection(request?.Relationship),
-            ToolInstructions = NormalizeSection(request?.ToolInstructions),
+            Identity = SystemPromptSectionContent.Normalize(request?.Identity),
+            Voice = SystemPromptSectionContent.Normalize(request?.Voice),
+            Role = SystemPromptSectionContent.Normalize(request?.Role),
+            Relationship = SystemPromptSectionContent.Normalize(request?.Relationship),
+            ToolInstructions = SystemPromptSectionContent.Normalize(request?.ToolInstructions),
             CreatedAt = now,
             UpdatedAt = now
         };
-    }
-
-    private static string? NormalizeSection(string? content)
-    {
-        return string.IsNullOrWhiteSpace(content) ? null : content.Trim();
     }
 }

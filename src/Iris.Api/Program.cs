@@ -13,6 +13,8 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System.Text.Json.Serialization;
 
+const string chatHubRoute = "/hubs/chat";
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
@@ -58,14 +60,14 @@ builder.Services
                 var accessToken = context.Request.Query["access_token"];
                 var path = context.HttpContext.Request.Path;
 
-                if (!string.IsNullOrEmpty(accessToken) 
-                    && path.StartsWithSegments("/hubs/chat"))
+                if (!string.IsNullOrEmpty(accessToken)
+                    && path.StartsWithSegments(chatHubRoute))
                 {
                     context.Token = accessToken;
                     return Task.CompletedTask;
                 }
 
-                if (context.Request.Cookies.TryGetValue("access_token", out var token))
+                if (context.Request.Cookies.TryGetValue(AuthCookieService.AccessTokenCookieName, out var token))
                 {
                     context.Token = token;
                 }
@@ -138,7 +140,7 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
-app.MapHub<ChatHub>("/hubs/chat").RequireAuthorization();
+app.MapHub<ChatHub>(chatHubRoute).RequireAuthorization();
 app.MapHealthChecks("/health");
 app.Run();
 

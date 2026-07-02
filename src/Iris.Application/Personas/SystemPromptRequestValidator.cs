@@ -10,20 +10,11 @@ public static class SystemPromptRequestValidator
             return;
 
         var invalidSection = request.ExtensionData.Keys.First();
-        var normalized = Normalize(invalidSection);
+        var normalized = SystemPromptSectionParser.Normalize(invalidSection);
 
         if (normalized is "appcontext" or "guidelines")
             throw new ValidationException("AppContext and Guidelines are platform-owned system prompt sections.");
 
         throw new ValidationException($"Unknown system prompt section '{invalidSection}'.");
-    }
-
-    private static string Normalize(string value)
-    {
-        return value
-            .Trim()
-            .Replace("-", string.Empty, StringComparison.Ordinal)
-            .Replace("_", string.Empty, StringComparison.Ordinal)
-            .ToLowerInvariant();
     }
 }

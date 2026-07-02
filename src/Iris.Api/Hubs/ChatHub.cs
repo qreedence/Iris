@@ -20,16 +20,11 @@ public class ChatHub : Hub<IChatClient>
         if (!await _conversationQueries.ExistsForUserAsync(conversationId, Context.ConnectionAborted))
             throw new HubException("Conversation does not exist for this user");
 
-        await Groups.AddToGroupAsync(Context.ConnectionId, GetConversationGroupName(conversationId), Context.ConnectionAborted);
+        await Groups.AddToGroupAsync(Context.ConnectionId, ConversationGroups.For(conversationId), Context.ConnectionAborted);
     }
 
     public Task LeaveConversation(Guid conversationId)
     {
-        return Groups.RemoveFromGroupAsync(Context.ConnectionId, GetConversationGroupName(conversationId));
-    }
-
-    private static string GetConversationGroupName(Guid conversationId)
-    {
-        return $"conversation-{conversationId}";
+        return Groups.RemoveFromGroupAsync(Context.ConnectionId, ConversationGroups.For(conversationId));
     }
 }
