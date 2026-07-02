@@ -700,7 +700,7 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
         var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
         userService.OverrideUserId = userId;
         var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
-        return await personaService.GetByIdAsync(userId, personaId, TestContext.Current.CancellationToken);
+        return await personaService.GetByIdAsync(personaId, TestContext.Current.CancellationToken);
     }
 
     private async Task<SystemPromptDto> GetSystemPromptDirectAsync(Guid userId, Guid personaId)
@@ -709,7 +709,7 @@ public class PersonaEndpointTests : IClassFixture<ApiTestFactory>
         var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
         userService.OverrideUserId = userId;
         var systemPromptService = scope.ServiceProvider.GetRequiredService<ISystemPromptService>();
-        return await systemPromptService.GetByPersonaIdAsync(userId, personaId, TestContext.Current.CancellationToken);
+        return await systemPromptService.GetByPersonaIdAsync(personaId, TestContext.Current.CancellationToken);
     }
 
     // ── Unauthenticated coverage ──────────────────────────────────

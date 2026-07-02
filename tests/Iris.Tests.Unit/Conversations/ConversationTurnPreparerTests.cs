@@ -264,7 +264,7 @@ public class ConversationTurnPreparerTests
         var conversationId = Guid.NewGuid();
         var personaId = Guid.NewGuid();
         SetupExistingConversation(conversationId, personaId);
-        _personaService.GetForConversationAsync(personaId, Arg.Any<CancellationToken>())
+        _personaService.GetByIdAsync(personaId, Arg.Any<CancellationToken>())
             .Returns<Task<PersonaDto>>(_ => throw new NotFoundException("Persona not found."));
 
         // Act
@@ -358,7 +358,7 @@ public class ConversationTurnPreparerTests
         SystemPromptDto? systemPrompt,
         string? modelPreference = null)
     {
-        _personaService.GetForConversationAsync(personaId, Arg.Any<CancellationToken>())
+        _personaService.GetByIdAsync(personaId, Arg.Any<CancellationToken>())
             .Returns(new PersonaDto(
                 personaId,
                 "Iris",

@@ -2,6 +2,7 @@ using FluentAssertions;
 using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.StartConversationTurn;
+using Iris.Application.Conversations.Queries;
 using Iris.Application.Exceptions;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
@@ -11,7 +12,7 @@ namespace Iris.Tests.Unit.Conversations;
 
 public class StartConversationTurnHandlerTests
 {
-    private readonly IEventStore _eventStore = Substitute.For<IEventStore>();
+    private readonly IConversationQueries _conversationQueries = Substitute.For<IConversationQueries>();
     private readonly IConversationEventRecorder _eventRecorder = Substitute.For<IConversationEventRecorder>();
     private readonly IConversationTurnQueue _turnQueue = Substitute.For<IConversationTurnQueue>();
 
@@ -31,7 +32,7 @@ public class StartConversationTurnHandlerTests
         _eventRecorder.ClearReceivedCalls();
         _turnQueue.ClearReceivedCalls();
 
-        return new StartConversationTurnHandler(_eventStore, _eventRecorder, _turnQueue);
+        return new StartConversationTurnHandler(_conversationQueries, _eventRecorder, _turnQueue);
     }
 
     private static StartConversationTurnCommand CreateValidCommand(
@@ -51,13 +52,10 @@ public class StartConversationTurnHandlerTests
              ModelParameters = modelParameters
          };
 
-    private void SetupExistingConversation(Guid conversationId, Guid? ownerId = null)
+    private void SetupExistingConversation(Guid conversationId, bool existsForCurrentUser = true)
     {
-        _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
-            .Returns(new List<ConversationEvent>
-            {
-                new ConversationCreated(conversationId, ownerId ?? Guid.NewGuid(), Guid.NewGuid(), "Existing Conversation")
-            });
+        _conversationQueries.ExistsForUserAsync(conversationId, Arg.Any<CancellationToken>())
+            .Returns(existsForCurrentUser);
     }
 
     [Fact]
@@ -74,7 +72,7 @@ public class StartConversationTurnHandlerTests
             model: "test/model",
             changeModel: true,
             modelParameters: modelParameters);
-        SetupExistingConversation(conversationId, ownerId: userId);
+        SetupExistingConversation(conversationId);
         var sut = CreateSut();
 
         // Act
@@ -134,8 +132,7 @@ public class StartConversationTurnHandlerTests
     {
         // Arrange
         var command = CreateValidCommand();
-        _eventStore.LoadStreamAsync(command.ConversationId, Arg.Any<CancellationToken>())
-            .Returns(new List<ConversationEvent>());
+        SetupExistingConversation(command.ConversationId, existsForCurrentUser: false);
         var sut = CreateSut();
 
         // Act
@@ -211,11 +208,12 @@ public class StartConversationTurnHandlerTests
     [Fact]
     public async Task Handle_ConversationBelongsToAnotherUser_ThrowsNotFoundAndDoesNotRecord()
     {
-        // Arrange
+        // Arrange — the read model's ExistsForUserAsync is scoped by the EF query
+        // filter to the caller's ICurrentUserService; simulate "belongs to another
+        // user" by having it return false, the same result an attacker would get.
         var conversationId = Guid.NewGuid();
-        var ownerId = Guid.NewGuid();
         var attackerId = Guid.NewGuid();
-        SetupExistingConversation(conversationId, ownerId: ownerId);
+        SetupExistingConversation(conversationId, existsForCurrentUser: false);
         var sut = CreateSut();
         var command = CreateValidCommand(userId: attackerId, conversationId: conversationId);
 

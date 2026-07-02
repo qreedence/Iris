@@ -24,8 +24,8 @@ public class CreateConversationHandlerTests
 
         _eventRecorder.ClearReceivedCalls();
 
-        _personaService.GetByIdAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
-            .Returns(call => CreatePersonaDto(call.ArgAt<Guid>(1)));
+        _personaService.GetByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(call => CreatePersonaDto(call.ArgAt<Guid>(0)));
 
         return new CreateConversationHandler(_eventStore, _eventRecorder, _personaService);
     }
@@ -177,7 +177,7 @@ public class CreateConversationHandlerTests
         var sut = CreateSut();
         var command = CreateValidCommand();
 
-        _personaService.GetByIdAsync(command.UserId, command.PersonaId, Arg.Any<CancellationToken>())
+        _personaService.GetByIdAsync(command.PersonaId, Arg.Any<CancellationToken>())
             .Returns<PersonaDto>(_ => throw new NotFoundException("Persona not found."));
 
         // Act
