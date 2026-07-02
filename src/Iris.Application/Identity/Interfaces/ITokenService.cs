@@ -3,6 +3,6 @@
     public interface ITokenService
     {
         Task<string> GenerateAccessTokenAsync(Guid userId, string email, CancellationToken ct = default);
-        Task<string> GenerateRefreshToken();
+        Task<string> GenerateRefreshTokenAsync(CancellationToken ct = default);
     }
 }

@@ -30,7 +30,7 @@ namespace Iris.Infrastructure.Projectors
                 CreatedAt = notification.OccurredAt
             };
             _db.ConversationMessages.Add(message);
-            var conversation = await _db.ConversationReadModels.FirstOrDefaultAsync(c => c.Id == message.ConversationId);
+            var conversation = await _db.ConversationReadModels.FirstOrDefaultAsync(c => c.Id == message.ConversationId, ct);
             if (conversation != null)
             {
                 conversation.MessageCount++;

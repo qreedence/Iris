@@ -33,15 +33,17 @@ namespace Iris.Infrastructure.Identity
                 issuer: _jwtOptions.Issuer,
                 audience: _jwtOptions.Audience,
                 claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(_jwtOptions.AccessTokenExpirationMinutes),
+                expires: DateTimeOffset.UtcNow.AddMinutes(_jwtOptions.AccessTokenExpirationMinutes).UtcDateTime,
                 signingCredentials: credentials);
 
             var tokenString = new JwtSecurityTokenHandler().WriteToken(token);
             return Task.FromResult(tokenString);
         }
 
-        public Task<string> GenerateRefreshToken()
+        public Task<string> GenerateRefreshTokenAsync(CancellationToken ct = default)
         {
+            ct.ThrowIfCancellationRequested();
+
             var bytes = RandomNumberGenerator.GetBytes(64);
             return Task.FromResult(Convert.ToBase64String(bytes));
         }

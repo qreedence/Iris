@@ -65,14 +65,15 @@ namespace Iris.Infrastructure.Identity
                     throw new ValidationException(addLoginResult.Errors.First().Description);
             }
 
-            var refreshTokenString = await _tokenService.GenerateRefreshToken();
+            var now = DateTimeOffset.UtcNow;
+            var refreshTokenString = await _tokenService.GenerateRefreshTokenAsync(ct);
             var refreshToken = new RefreshToken
             {
                 Token = refreshTokenString,
                 UserId = user.Id,
                 FamilyId = Guid.NewGuid(),
-                ExpiresAt = DateTimeOffset.UtcNow.AddDays(_jwtOptions.RefreshTokenExpirationDays),
-                CreatedAt = DateTimeOffset.UtcNow
+                ExpiresAt = now.AddDays(_jwtOptions.RefreshTokenExpirationDays),
+                CreatedAt = now
             };
 
             _db.RefreshTokens.Add(refreshToken);
@@ -82,18 +83,20 @@ namespace Iris.Infrastructure.Identity
             {
                 AccessToken = await _tokenService.GenerateAccessTokenAsync(user.Id, user.Email!, ct),
                 RefreshToken = refreshTokenString,
-                AccessTokenExpiresAt = DateTimeOffset.UtcNow.AddMinutes(_jwtOptions.AccessTokenExpirationMinutes),
-                RefreshTokenExpiresAt = DateTimeOffset.UtcNow.AddDays(_jwtOptions.RefreshTokenExpirationDays)
+                AccessTokenExpiresAt = now.AddMinutes(_jwtOptions.AccessTokenExpirationMinutes),
+                RefreshTokenExpiresAt = now.AddDays(_jwtOptions.RefreshTokenExpirationDays)
             };
         }
 
         public async Task<AuthTokenResult> RefreshAsync(string refreshToken, CancellationToken ct = default)
         {
+            var now = DateTimeOffset.UtcNow;
+
             var existing = await _db.RefreshTokens
                 .AsNoTracking()
                 .FirstOrDefaultAsync(t => t.Token == refreshToken, ct);
 
-            if (existing == null || existing.IsRevoked || existing.ExpiresAt < DateTimeOffset.UtcNow)
+            if (existing == null || existing.IsRevoked || existing.ExpiresAt < now)
                 throw new UnauthorizedException("Invalid refresh token");
 
             await using var transaction = await _db.Database.BeginTransactionAsync(ct);
@@ -124,9 +127,9 @@ namespace Iris.Infrastructure.Identity
             var result = new AuthTokenResult
             {
                 AccessToken = await _tokenService.GenerateAccessTokenAsync(user.Id, user.Email!, ct),
-                RefreshToken = await _tokenService.GenerateRefreshToken(),
-                AccessTokenExpiresAt = DateTimeOffset.UtcNow.AddMinutes(_jwtOptions.AccessTokenExpirationMinutes),
-                RefreshTokenExpiresAt = DateTimeOffset.UtcNow.AddDays(_jwtOptions.RefreshTokenExpirationDays)
+                RefreshToken = await _tokenService.GenerateRefreshTokenAsync(ct),
+                AccessTokenExpiresAt = now.AddMinutes(_jwtOptions.AccessTokenExpirationMinutes),
+                RefreshTokenExpiresAt = now.AddDays(_jwtOptions.RefreshTokenExpirationDays)
             };
 
             var newRefreshToken = new RefreshToken
@@ -135,7 +138,7 @@ namespace Iris.Infrastructure.Identity
                 Token = result.RefreshToken,
                 UserId = user.Id,
                 ExpiresAt = result.RefreshTokenExpiresAt,
-                CreatedAt = DateTimeOffset.UtcNow,
+                CreatedAt = now,
             };
 
             _db.RefreshTokens.Add(newRefreshToken);

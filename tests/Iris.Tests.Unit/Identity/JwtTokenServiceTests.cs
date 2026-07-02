@@ -63,13 +63,13 @@ public class JwtTokenServiceTests
     }
 
     [Fact]
-    public async Task GenerateRefreshToken_ReturnsSecureRandomToken()
+    public async Task GenerateRefreshTokenAsync_ReturnsSecureRandomToken()
     {
         // Arrange
         var sut = CreateSut();
 
         // Act
-        var token = await sut.GenerateRefreshToken();
+        var token = await sut.GenerateRefreshTokenAsync(TestContext.Current.CancellationToken);
 
         // Assert
         token.Should().NotBeNullOrWhiteSpace();
@@ -77,14 +77,14 @@ public class JwtTokenServiceTests
     }
 
     [Fact]
-    public async Task GenerateRefreshToken_ConsecutiveCallsProduceDifferentTokens()
+    public async Task GenerateRefreshTokenAsync_ConsecutiveCallsProduceDifferentTokens()
     {
         // Arrange
         var sut = CreateSut();
 
         // Act
-        var first = await sut.GenerateRefreshToken();
-        var second = await sut.GenerateRefreshToken();
+        var first = await sut.GenerateRefreshTokenAsync(TestContext.Current.CancellationToken);
+        var second = await sut.GenerateRefreshTokenAsync(TestContext.Current.CancellationToken);
 
         // Assert
         second.Should().NotBe(first);

@@ -60,7 +60,7 @@ namespace Iris.Api.Controllers
         }
 
         [HttpPost("refresh")]
-        public async Task<IActionResult> Refresh(CancellationToken ct)
+        public async Task<IActionResult> Refresh(CancellationToken ct = default)
         {
             var refreshToken = Request.Cookies[AuthCookieService.RefreshTokenCookieName];
 
@@ -74,7 +74,7 @@ namespace Iris.Api.Controllers
         }
 
         [HttpPost("logout")]
-        public async Task<IActionResult> Logout(CancellationToken ct)
+        public async Task<IActionResult> Logout(CancellationToken ct = default)
         {
             var refreshToken = Request.Cookies[AuthCookieService.RefreshTokenCookieName];
 
