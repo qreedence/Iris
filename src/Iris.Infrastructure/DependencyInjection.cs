@@ -65,6 +65,7 @@ namespace Iris.Infrastructure
             services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(DependencyInjection).Assembly));
             services.AddScoped<IConversationQueries, ConversationQueries>();
             services.AddScoped<IEventStore, EfEventStore>();
+            services.AddScoped<IConversationTurnRequestStore, EfConversationTurnRequestStore>();
             services.AddScoped<IPersonaService, PersonaService>();
             services.AddScoped<ISystemPromptService, SystemPromptService>();
             services.AddSingleton<IGlobalSystemPromptProvider, ConfigurationGlobalSystemPromptProvider>();

@@ -24,6 +24,7 @@ public class AppDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Guid
     public DbSet<StoredEvent> StoredEvents { get; set; }
     public DbSet<ConversationReadModel> ConversationReadModels { get; set; }
     public DbSet<ConversationMessage> ConversationMessages { get; set; }
+    public DbSet<ConversationTurnRequest> ConversationTurnRequests { get; set; }
     public DbSet<Persona> Personas { get; set; }
     public DbSet<SystemPrompt> SystemPrompts { get; set; }
     public DbSet<RefreshToken> RefreshTokens { get; set; }
