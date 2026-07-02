@@ -1,7 +1,8 @@
 using FluentAssertions;
 using Iris.Application.Conversations.Commands.CreateConversation;
-using Iris.Application.Conversations.Commands.SendMessage;
+using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
+using Iris.Tests.Integration.Helpers;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -27,6 +28,31 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
         return await mediator.Send(command, TestContext.Current.CancellationToken);
     }
 
+    /// <summary>
+    /// Seeds a MessageSent event using a fresh DI scope, equivalent to what
+    /// SendMessageCommand used to do.
+    /// </summary>
+    private async Task SendMessage(Guid conversationId, string content, ChatRole role = ChatRole.User)
+    {
+        using var provider = _factory.CreateServiceProvider();
+        await ConversationSeeder.SendMessageAsync(
+            provider, conversationId, content, role, ct: TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// Creates a real persona owned by the fixture's test user, so
+    /// CreateConversationCommand's persona-ownership check succeeds.
+    /// </summary>
+    private async Task<Guid> CreatePersonaAsync()
+    {
+        using var provider = _factory.CreateServiceProvider();
+        using var scope = provider.CreateScope();
+        var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
+        var persona = await personaService.CreateAsync(
+            _userId, new CreatePersonaRequest("Iris"), TestContext.Current.CancellationToken);
+        return persona.Id;
+    }
+
     // ── §1 ConversationCreated projection ─────────────────────────
 
     [Fact]
@@ -34,7 +60,7 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        var personaId = Guid.NewGuid();
+        var personaId = await CreatePersonaAsync();
 
         // Act
         await SendCommand(new CreateConversationCommand(conversationId, _userId, personaId, "Projected Chat"));
@@ -58,10 +84,11 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, _userId, Guid.NewGuid(), "Chat"));
+        var personaId = await CreatePersonaAsync();
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, personaId, "Chat"));
 
         // Act
-        await SendCommand(new SendMessageCommand(conversationId, "Hello, Iris!", ChatRole.User));
+        await SendMessage(conversationId, "Hello, Iris!", ChatRole.User);
 
         // Assert
         await using var db = _factory.CreateDbContext();
@@ -82,10 +109,11 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, _userId, Guid.NewGuid(), "Chat"));
+        var personaId = await CreatePersonaAsync();
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, personaId, "Chat"));
 
         // Act
-        await SendCommand(new SendMessageCommand(conversationId, "First message", ChatRole.User));
+        await SendMessage(conversationId, "First message", ChatRole.User);
 
         // Assert
         await using var db = _factory.CreateDbContext();
@@ -105,12 +133,13 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, _userId, Guid.NewGuid(), "Chat"));
+        var personaId = await CreatePersonaAsync();
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, personaId, "Chat"));
 
         // Act
-        await SendCommand(new SendMessageCommand(conversationId, "First", ChatRole.User));
-        await SendCommand(new SendMessageCommand(conversationId, "Second", ChatRole.User));
-        await SendCommand(new SendMessageCommand(conversationId, "Third", ChatRole.User));
+        await SendMessage(conversationId, "First", ChatRole.User);
+        await SendMessage(conversationId, "Second", ChatRole.User);
+        await SendMessage(conversationId, "Third", ChatRole.User);
 
         // Assert
         await using var db = _factory.CreateDbContext();
@@ -130,14 +159,16 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
         // Arrange
         var conversationA = Guid.NewGuid();
         var conversationB = Guid.NewGuid();
+        var personaA = await CreatePersonaAsync();
+        var personaB = await CreatePersonaAsync();
 
-        await SendCommand(new CreateConversationCommand(conversationA, _userId, Guid.NewGuid(), "Chat A"));
-        await SendCommand(new CreateConversationCommand(conversationB, _userId, Guid.NewGuid(), "Chat B"));
+        await SendCommand(new CreateConversationCommand(conversationA, _userId, personaA, "Chat A"));
+        await SendCommand(new CreateConversationCommand(conversationB, _userId, personaB, "Chat B"));
 
         // Act
-        await SendCommand(new SendMessageCommand(conversationA, "Message A1", ChatRole.User));
-        await SendCommand(new SendMessageCommand(conversationA, "Message A2", ChatRole.User));
-        await SendCommand(new SendMessageCommand(conversationB, "Message B1", ChatRole.User));
+        await SendMessage(conversationA, "Message A1", ChatRole.User);
+        await SendMessage(conversationA, "Message A2", ChatRole.User);
+        await SendMessage(conversationB, "Message B1", ChatRole.User);
 
         // Assert
         await using var db = _factory.CreateDbContext();
@@ -162,12 +193,13 @@ public class ProjectorTests : IClassFixture<IntegrationTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, _userId, Guid.NewGuid(), "Chat"));
+        var personaId = await CreatePersonaAsync();
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, personaId, "Chat"));
 
         // Act
-        await SendCommand(new SendMessageCommand(conversationId, "First", ChatRole.User));
-        await SendCommand(new SendMessageCommand(conversationId, "Second", ChatRole.User));
-        await SendCommand(new SendMessageCommand(conversationId, "Third", ChatRole.User));
+        await SendMessage(conversationId, "First", ChatRole.User);
+        await SendMessage(conversationId, "Second", ChatRole.User);
+        await SendMessage(conversationId, "Third", ChatRole.User);
 
         // Assert
         await using var db = _factory.CreateDbContext();

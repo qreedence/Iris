@@ -305,30 +305,6 @@ public class ConversationTurnPreparerTests
             .WithMessage("*does not exist*");
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    public async Task PrepareAsync_EmptyRequestedModel_ThrowsValidationException(string? requestedModel)
-    {
-        // Arrange
-        var sut = CreateSut();
-        var conversationId = Guid.NewGuid();
-
-        // Act
-        var act = () => sut.PrepareAsync(
-            _userId,
-            conversationId,
-            requestedModel!,
-            changeModel: false,
-            modelParameters: null,
-            TestContext.Current.CancellationToken);
-
-        // Assert
-        await act.Should().ThrowAsync<ValidationException>()
-            .WithMessage("*Model*");
-    }
-
     private void SetupExistingConversation(Guid conversationId, Guid personaId)
     {
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())

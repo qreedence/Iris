@@ -35,8 +35,6 @@ public class ApiTestFactory : WebApplicationFactory<Program>, IAsyncLifetime
     private static IChatProvider CreateDefaultMockChatProvider()
     {
         var mock = Substitute.For<IChatProvider>();
-        mock.CompleteAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new ChatResponse("Mock AI response", new UsageInfo(10, 5, 15)));
         mock.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
             .Returns(call => StreamResponse("Mock AI response", call.ArgAt<CancellationToken>(1)));
         return mock;

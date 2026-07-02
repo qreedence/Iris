@@ -2,6 +2,7 @@ using FluentAssertions;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Exceptions;
+using Iris.Application.Personas;
 using Iris.Domain.Conversations.Events;
 using NSubstitute;
 
@@ -11,6 +12,7 @@ public class CreateConversationHandlerTests
 {
     private readonly IEventStore _eventStore = Substitute.For<IEventStore>();
     private readonly IConversationEventRecorder _eventRecorder = Substitute.For<IConversationEventRecorder>();
+    private readonly IPersonaService _personaService = Substitute.For<IPersonaService>();
 
     private CreateConversationHandler CreateSut()
     {
@@ -22,8 +24,23 @@ public class CreateConversationHandlerTests
 
         _eventRecorder.ClearReceivedCalls();
 
-        return new CreateConversationHandler(_eventStore, _eventRecorder);
+        _personaService.GetByIdAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(call => CreatePersonaDto(call.ArgAt<Guid>(1)));
+
+        return new CreateConversationHandler(_eventStore, _eventRecorder, _personaService);
     }
+
+    private static PersonaDto CreatePersonaDto(Guid personaId) =>
+        new(
+            personaId,
+            "Iris",
+            SystemPromptDto.Empty,
+            null,
+            null,
+            null,
+            null,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow);
 
     private static CreateConversationCommand CreateValidCommand(
         Guid? conversationId = null,
@@ -146,6 +163,28 @@ public class CreateConversationHandlerTests
         // Assert
         await act.Should().ThrowAsync<ValidationException>()
             .WithMessage("*already exists*");
+
+        await _eventRecorder.DidNotReceive().RecordAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<IEnumerable<ConversationEvent>>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_PersonaDoesNotExist_ThrowsNotFoundExceptionAndDoesNotRecordEvent()
+    {
+        // Arrange
+        var sut = CreateSut();
+        var command = CreateValidCommand();
+
+        _personaService.GetByIdAsync(command.UserId, command.PersonaId, Arg.Any<CancellationToken>())
+            .Returns<PersonaDto>(_ => throw new NotFoundException("Persona not found."));
+
+        // Act
+        var act = () => sut.Handle(command, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<NotFoundException>();
 
         await _eventRecorder.DidNotReceive().RecordAsync(
             Arg.Any<Guid>(),

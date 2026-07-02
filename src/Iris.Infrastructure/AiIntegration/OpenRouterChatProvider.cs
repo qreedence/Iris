@@ -24,42 +24,6 @@ public class OpenRouterChatProvider : IChatProvider
         _httpClient = httpClient;
     }
 
-    public async Task<ChatResponse> CompleteAsync(ChatRequest request, CancellationToken ct = default)
-    {
-        try
-        {
-            var content = JsonContent.Create(MapToOpenRouterRequest(request), options: _jsonOptions);
-            using var response = await _httpClient.PostAsync("/api/v1/responses", content, ct);
-
-            await EnsureSuccessAsync(response, ct);
-            var json = await response.Content.ReadAsStringAsync(ct);
-
-            var orResponse = JsonSerializer.Deserialize<OpenRouterResponse>(json, _jsonOptions)
-                ?? throw new ChatDeserializationException("Failed to deserialize OpenRouter response");
-
-            var usage = orResponse.Usage is { } u
-                ? new UsageInfo(u.InputTokens, u.OutputTokens, u.TotalTokens)
-                : null;
-
-            var text = orResponse.Output
-                .Where(o => o.Type == "message")
-                .SelectMany(o => o.Content ?? [])
-                .Where(c => c.Type == "output_text")
-                .Select(c => c.Text)
-                .FirstOrDefault() ?? string.Empty;
-
-            return new ChatResponse(text, usage);
-        }
-        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
-        {
-            throw new ChatTimeoutException("OpenRouter request timed out", ex);
-        }
-        catch (JsonException ex)
-        {
-            throw new ChatDeserializationException("Failed to deserialize OpenRouter response", ex);
-        }
-    }
-
     public async IAsyncEnumerable<StreamedChunk> StreamAsync(
         ChatRequest request,
         [EnumeratorCancellation] CancellationToken ct = default)

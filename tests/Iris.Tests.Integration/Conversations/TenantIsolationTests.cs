@@ -3,11 +3,12 @@ using FluentAssertions;
 using Iris.Api.Authentication;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
-using Iris.Application.Conversations.Commands.SendMessage;
 using Iris.Application.Conversations.Queries;
 using Iris.Application.Identity.Interfaces;
+using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
+using Iris.Tests.Integration.Helpers;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -37,11 +38,34 @@ public class TenantIsolationTests : IClassFixture<ApiTestFactory>
         await mediator.Send(command, TestContext.Current.CancellationToken);
     }
 
+    /// <summary>
+    /// Seeds a MessageSent event as the given user, equivalent to what
+    /// SendMessageCommand used to do via SendCommandAs.
+    /// </summary>
+    private Task SendMessageAs(Guid userId, Guid conversationId, string content, ChatRole role = ChatRole.User)
+    {
+        return ConversationSeeder.SendMessageAsync(
+            _factory.Services, conversationId, content, role, userId, TestContext.Current.CancellationToken);
+    }
+
     private IConversationQueries CreateQueriesAs(IServiceScope scope, Guid userId)
     {
         var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
         userService.OverrideUserId = userId;
         return scope.ServiceProvider.GetRequiredService<IConversationQueries>();
+    }
+
+    /// <summary>
+    /// Creates a real persona owned by the given user, so
+    /// CreateConversationCommand's persona-ownership check succeeds.
+    /// </summary>
+    private async Task<Guid> CreatePersonaAsync(Guid userId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
+        var persona = await personaService.CreateAsync(
+            userId, new CreatePersonaRequest("Iris"), TestContext.Current.CancellationToken);
+        return persona.Id;
     }
 
     // ── ConversationQueries.GetAllAsync isolation ─────────────────
@@ -52,8 +76,10 @@ public class TenantIsolationTests : IClassFixture<ApiTestFactory>
         // Arrange
         var convA = Guid.NewGuid();
         var convB = Guid.NewGuid();
-        await SendCommandAs(_userA, new CreateConversationCommand(convA, _userA, Guid.NewGuid(), "User A Chat"));
-        await SendCommandAs(_userB, new CreateConversationCommand(convB, _userB, Guid.NewGuid(), "User B Chat"));
+        var personaA = await CreatePersonaAsync(_userA);
+        var personaB = await CreatePersonaAsync(_userB);
+        await SendCommandAs(_userA, new CreateConversationCommand(convA, _userA, personaA, "User A Chat"));
+        await SendCommandAs(_userB, new CreateConversationCommand(convB, _userB, personaB, "User B Chat"));
 
         // Act — query as user A
         using var scope = _factory.Services.CreateScope();
@@ -72,8 +98,9 @@ public class TenantIsolationTests : IClassFixture<ApiTestFactory>
     {
         // Arrange
         var convA = Guid.NewGuid();
-        await SendCommandAs(_userA, new CreateConversationCommand(convA, _userA, Guid.NewGuid(), "User A Chat"));
-        await SendCommandAs(_userA, new SendMessageCommand(convA, "Secret message", ChatRole.User));
+        var personaA = await CreatePersonaAsync(_userA);
+        await SendCommandAs(_userA, new CreateConversationCommand(convA, _userA, personaA, "User A Chat"));
+        await SendMessageAs(_userA, convA, "Secret message", ChatRole.User);
 
         // Act — query as user B
         using var scope = _factory.Services.CreateScope();
@@ -91,7 +118,8 @@ public class TenantIsolationTests : IClassFixture<ApiTestFactory>
     {
         // Arrange
         var convA = Guid.NewGuid();
-        await SendCommandAs(_userA, new CreateConversationCommand(convA, _userA, Guid.NewGuid(), "User A Chat"));
+        var personaA = await CreatePersonaAsync(_userA);
+        await SendCommandAs(_userA, new CreateConversationCommand(convA, _userA, personaA, "User A Chat"));
 
         // Act — check as user B
         using var scope = _factory.Services.CreateScope();
@@ -113,8 +141,9 @@ public class TenantIsolationTests : IClassFixture<ApiTestFactory>
         // LoadStream directly, you get events. The security boundary is the controller.
 
         var convA = Guid.NewGuid();
-        await SendCommandAs(_userA, new CreateConversationCommand(convA, _userA, Guid.NewGuid(), "User A Chat"));
-        await SendCommandAs(_userA, new SendMessageCommand(convA, "Hello", ChatRole.User));
+        var personaA = await CreatePersonaAsync(_userA);
+        await SendCommandAs(_userA, new CreateConversationCommand(convA, _userA, personaA, "User A Chat"));
+        await SendMessageAs(_userA, convA, "Hello", ChatRole.User);
 
         // Load as user B directly through the event store (no API layer)
         using var scope = _factory.Services.CreateScope();
@@ -132,7 +161,8 @@ public class TenantIsolationTests : IClassFixture<ApiTestFactory>
     {
         // Prove that the API layer prevents event store writes for other users.
         var convA = Guid.NewGuid();
-        await SendCommandAs(_userA, new CreateConversationCommand(convA, _userA, Guid.NewGuid(), "User A Chat"));
+        var personaA = await CreatePersonaAsync(_userA);
+        await SendCommandAs(_userA, new CreateConversationCommand(convA, _userA, personaA, "User A Chat"));
 
         using var scopeBefore = _factory.Services.CreateScope();
         var storeBefore = scopeBefore.ServiceProvider.GetRequiredService<IEventStore>();
@@ -160,7 +190,8 @@ public class TenantIsolationTests : IClassFixture<ApiTestFactory>
     {
         // Arrange & Act
         var convId = Guid.NewGuid();
-        await SendCommandAs(_userA, new CreateConversationCommand(convId, _userA, Guid.NewGuid(), "Projected"));
+        var personaId = await CreatePersonaAsync(_userA);
+        await SendCommandAs(_userA, new CreateConversationCommand(convId, _userA, personaId, "Projected"));
 
         // Assert — read as the correct user to see it through the filter
         using var scope = _factory.Services.CreateScope();

@@ -1,4 +1,5 @@
 ﻿using Iris.Api.Authentication;
+using Iris.Application.Exceptions;
 using Iris.Application.Identity.DTOs;
 using Iris.Application.Identity.Interfaces;
 using Iris.Domain.Identity.Enums;
@@ -38,7 +39,7 @@ namespace Iris.Api.Controllers
                 case LoginProvider.Google:
                     return Challenge(properties, GoogleDefaults.AuthenticationScheme);
                 default:
-                    return BadRequest();
+                    throw new ValidationException("Unsupported login provider.");
             }
         }
 
@@ -47,11 +48,11 @@ namespace Iris.Api.Controllers
         {
             var result = await HttpContext.AuthenticateAsync("ExternalLogin");
             if (!result.Succeeded)
-                return BadRequest("Authentication failed");
+                throw new ValidationException("Authentication failed.");
 
             var providerString = result.Properties?.Items["LoginProvider"];
             if (!Enum.TryParse<LoginProvider>(providerString, out var provider))
-                return BadRequest("Unknown login provider");
+                throw new ValidationException("Unknown login provider.");
 
             var authTokens = await _authService.HandleSocialLoginAsync(provider, result.Principal!, ct);
             _cookieService.SetAuthCookies(Response, authTokens);
@@ -64,7 +65,7 @@ namespace Iris.Api.Controllers
             var refreshToken = Request.Cookies["refresh_token"];
 
             if (string.IsNullOrWhiteSpace(refreshToken))
-                return Unauthorized();
+                throw new UnauthorizedException("Invalid refresh token");
 
             var authTokens = await _authService.RefreshAsync(refreshToken, ct);
             _cookieService.SetAuthCookies(Response, authTokens);
@@ -92,8 +93,8 @@ namespace Iris.Api.Controllers
             var userId = User.GetUserId();
             var email = User.FindFirstValue(JwtRegisteredClaimNames.Email);
 
-            if (userId == Guid.Empty || string.IsNullOrWhiteSpace(email))
-                return Unauthorized();
+            if (string.IsNullOrWhiteSpace(email))
+                throw new UnauthorizedException("Invalid user");
 
             return Ok(new MeResponse
             {

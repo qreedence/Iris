@@ -1,11 +1,12 @@
 using FluentAssertions;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
-using Iris.Application.Conversations.Commands.SendMessage;
 using Iris.Application.Exceptions;
+using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
 using Iris.Infrastructure.Persistence;
+using Iris.Tests.Integration.Helpers;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -33,6 +34,16 @@ public class CommandFlowTests : IClassFixture<IntegrationTestFactory>
     }
 
     /// <summary>
+    /// Dispatches a command as the given user — sets the ambient current-user
+    /// (used by AppDbContext's Persona query filter) before sending.
+    /// </summary>
+    private async Task<TResponse> SendCommandAs<TResponse>(Guid userId, IRequest<TResponse> command)
+    {
+        _factory.CurrentUser.UserId = userId;
+        return await SendCommand(command);
+    }
+
+    /// <summary>
     /// Loads the event stream for a given conversation via a fresh DbContext.
     /// Used for assertion-side verification.
     /// </summary>
@@ -43,6 +54,33 @@ public class CommandFlowTests : IClassFixture<IntegrationTestFactory>
         return await store.LoadStreamAsync(conversationId, TestContext.Current.CancellationToken);
     }
 
+    /// <summary>
+    /// Seeds a MessageSent event using a fresh DI scope, equivalent to what
+    /// SendMessageCommand used to do.
+    /// </summary>
+    private async Task SendMessage(Guid conversationId, string content, ChatRole role = ChatRole.User)
+    {
+        using var provider = _factory.CreateServiceProvider();
+        await ConversationSeeder.SendMessageAsync(
+            provider, conversationId, content, role, ct: TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// Creates a real persona so CreateConversationCommand's persona-ownership
+    /// check (in CreateConversationHandler) succeeds.
+    /// </summary>
+    private async Task<Guid> CreatePersonaAsync(Guid userId)
+    {
+        _factory.CurrentUser.UserId = userId;
+
+        using var provider = _factory.CreateServiceProvider();
+        using var scope = provider.CreateScope();
+        var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
+        var persona = await personaService.CreateAsync(
+            userId, new CreatePersonaRequest("Iris"), TestContext.Current.CancellationToken);
+        return persona.Id;
+    }
+
     // ── §1 CreateConversation end-to-end ──────────────────────────
 
     [Fact]
@@ -50,11 +88,12 @@ public class CommandFlowTests : IClassFixture<IntegrationTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        var personaId = Guid.NewGuid();
-        var command = new CreateConversationCommand(conversationId, Guid.NewGuid(), personaId, "My First Chat");
+        var userId = Guid.NewGuid();
+        var personaId = await CreatePersonaAsync(userId);
+        var command = new CreateConversationCommand(conversationId, userId, personaId, "My First Chat");
 
         // Act
-        var result = await SendCommand(command);
+        var result = await SendCommandAs(userId, command);
 
         // Assert
         result.Should().Be(conversationId);
@@ -75,12 +114,12 @@ public class CommandFlowTests : IClassFixture<IntegrationTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), Guid.NewGuid(), "Chat"));
-
-        var sendCommand = new SendMessageCommand(conversationId, "Hello, Iris!", ChatRole.User);
+        var userId = Guid.NewGuid();
+        var personaId = await CreatePersonaAsync(userId);
+        await SendCommandAs(userId, new CreateConversationCommand(conversationId, userId, personaId, "Chat"));
 
         // Act
-        await SendCommand(sendCommand);
+        await SendMessage(conversationId, "Hello, Iris!", ChatRole.User);
 
         // Assert
         var stream = await LoadStream(conversationId);
@@ -101,12 +140,14 @@ public class CommandFlowTests : IClassFixture<IntegrationTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), Guid.NewGuid(), "Chat"));
+        var userId = Guid.NewGuid();
+        var personaId = await CreatePersonaAsync(userId);
+        await SendCommandAs(userId, new CreateConversationCommand(conversationId, userId, personaId, "Chat"));
 
         // Act
-        await SendCommand(new SendMessageCommand(conversationId, "First message", ChatRole.User));
-        await SendCommand(new SendMessageCommand(conversationId, "Second message", ChatRole.User));
-        await SendCommand(new SendMessageCommand(conversationId, "Third message", ChatRole.User));
+        await SendMessage(conversationId, "First message", ChatRole.User);
+        await SendMessage(conversationId, "Second message", ChatRole.User);
+        await SendMessage(conversationId, "Third message", ChatRole.User);
 
         // Assert
         var stream = await LoadStream(conversationId);
@@ -128,13 +169,17 @@ public class CommandFlowTests : IClassFixture<IntegrationTestFactory>
         // Arrange
         var conversationA = Guid.NewGuid();
         var conversationB = Guid.NewGuid();
+        var userA = Guid.NewGuid();
+        var userB = Guid.NewGuid();
+        var personaA = await CreatePersonaAsync(userA);
+        var personaB = await CreatePersonaAsync(userB);
 
-        await SendCommand(new CreateConversationCommand(conversationA, Guid.NewGuid(), Guid.NewGuid(), "Chat A"));
-        await SendCommand(new CreateConversationCommand(conversationB, Guid.NewGuid(), Guid.NewGuid(), "Chat B"));
+        await SendCommandAs(userA, new CreateConversationCommand(conversationA, userA, personaA, "Chat A"));
+        await SendCommandAs(userB, new CreateConversationCommand(conversationB, userB, personaB, "Chat B"));
 
         // Act
-        await SendCommand(new SendMessageCommand(conversationA, "Message for A", ChatRole.User));
-        await SendCommand(new SendMessageCommand(conversationB, "Message for B", ChatRole.User));
+        await SendMessage(conversationA, "Message for A", ChatRole.User);
+        await SendMessage(conversationB, "Message for B", ChatRole.User);
 
         // Assert
         var streamA = await LoadStream(conversationA);
@@ -154,10 +199,12 @@ public class CommandFlowTests : IClassFixture<IntegrationTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), Guid.NewGuid(), "First"));
+        var userId = Guid.NewGuid();
+        var personaId = await CreatePersonaAsync(userId);
+        await SendCommandAs(userId, new CreateConversationCommand(conversationId, userId, personaId, "First"));
 
         // Act — same ID again
-        var act = () => SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), Guid.NewGuid(), "Duplicate"));
+        var act = () => SendCommandAs(userId, new CreateConversationCommand(conversationId, userId, personaId, "Duplicate"));
 
         // Assert
         await act.Should().ThrowAsync<ValidationException>()
@@ -168,20 +215,4 @@ public class CommandFlowTests : IClassFixture<IntegrationTestFactory>
         stream.Should().HaveCount(1);
     }
 
-    // ── §6 Validation through MediatR ─────────────────────────────
-
-    [Fact]
-    public async Task SendMessage_ToNonExistentConversation_ThrowsNotFoundException()
-    {
-        // Arrange
-        var nonExistentId = Guid.NewGuid();
-        var command = new SendMessageCommand(nonExistentId, "Hello?", ChatRole.User);
-
-        // Act
-        var act = () => SendCommand(command);
-
-        // Assert
-        await act.Should().ThrowAsync<NotFoundException>()
-            .WithMessage("*does not exist*");
-    }
 }

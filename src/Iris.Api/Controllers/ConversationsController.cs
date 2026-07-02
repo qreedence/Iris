@@ -3,7 +3,6 @@ using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Commands.StartConversationTurn;
 using Iris.Application.Conversations.Queries;
-using Iris.Application.Personas;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,16 +16,13 @@ public class ConversationsController : ControllerBase
 {
     private readonly IConversationQueries _conversationQueries;
     private readonly IMediator _mediator;
-    private readonly IPersonaService _personaService;
 
     public ConversationsController(
         IConversationQueries conversationQueries,
-        IMediator mediator,
-        IPersonaService personaService)
+        IMediator mediator)
     {
         _conversationQueries = conversationQueries;
         _mediator = mediator;
-        _personaService = personaService;
     }
 
     [HttpPost]
@@ -37,7 +33,6 @@ public class ConversationsController : ControllerBase
         CancellationToken ct = default)
     {
         var userId = User.GetUserId();
-        await _personaService.GetByIdAsync(userId, request.PersonaId, ct);
 
         var conversationId = Guid.NewGuid();
         var command = new CreateConversationCommand(conversationId, userId, request.PersonaId, request.Title);
@@ -79,8 +74,6 @@ public class ConversationsController : ControllerBase
         CancellationToken ct = default)
     {
         var userId = User.GetUserId();
-        var exists = await _conversationQueries.ExistsForUserAsync(id, ct);
-        if (!exists) return NotFound();
 
         var command = new StartConversationTurnCommand
         {

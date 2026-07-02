@@ -6,11 +6,11 @@ using FluentAssertions;
 using Iris.Api.Authentication;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
-using Iris.Application.Conversations.Commands.SendMessage;
 using Iris.Application.Conversations.Queries;
 using Iris.Application.Identity.Interfaces;
 using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
+using Iris.Tests.Integration.Helpers;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -34,13 +34,25 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         _client = factory.CreateAuthenticatedClient(_userId);
     }
 
-    private async Task SendCommand<TResponse>(IRequest<TResponse> command)
+    private Task SendCommand<TResponse>(IRequest<TResponse> command) => SendCommandAs(_userId, command);
+
+    private async Task SendCommandAs<TResponse>(Guid userId, IRequest<TResponse> command)
     {
         using var scope = _factory.Services.CreateScope();
         var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
-        userService.OverrideUserId = _userId;
+        userService.OverrideUserId = userId;
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
         await mediator.Send(command, TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// Seeds a MessageSent event as the fixture's authenticated user, equivalent to
+    /// what SendMessageCommand used to do via SendCommand.
+    /// </summary>
+    private Task SendMessage(Guid conversationId, string content, ChatRole role = ChatRole.User)
+    {
+        return ConversationSeeder.SendMessageAsync(
+            _factory.Services, conversationId, content, role, _userId, TestContext.Current.CancellationToken);
     }
 
     // ── POST /api/conversations ────────────────────────────────────
@@ -226,9 +238,12 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         // Arrange
         var ownConversationId = Guid.NewGuid();
         var otherConversationId = Guid.NewGuid();
+        var ownPersona = await CreatePersonaAsync();
+        var otherUserId = Guid.NewGuid();
+        var otherPersona = await CreatePersonaForUserAsync(otherUserId, "Other User Persona");
 
-        await SendCommand(new CreateConversationCommand(ownConversationId, _userId, Guid.NewGuid(), "Mine"));
-        await SendCommand(new CreateConversationCommand(otherConversationId, Guid.NewGuid(), Guid.NewGuid(), "Not Mine"));
+        await SendCommand(new CreateConversationCommand(ownConversationId, _userId, ownPersona.Id, "Mine"));
+        await SendCommandAs(otherUserId, new CreateConversationCommand(otherConversationId, otherUserId, otherPersona.Id, "Not Mine"));
 
         // Act
         var response = await _client.GetAsync("/api/conversations", TestContext.Current.CancellationToken);
@@ -250,8 +265,10 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         // Arrange
         var id1 = Guid.NewGuid();
         var id2 = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(id1, _userId, Guid.NewGuid(), "Chat One"));
-        await SendCommand(new CreateConversationCommand(id2, _userId, Guid.NewGuid(), "Chat Two"));
+        var persona1 = await CreatePersonaAsync();
+        var persona2 = await CreatePersonaAsync();
+        await SendCommand(new CreateConversationCommand(id1, _userId, persona1.Id, "Chat One"));
+        await SendCommand(new CreateConversationCommand(id2, _userId, persona2.Id, "Chat Two"));
 
         // Act
         var response = await _client.GetAsync("/api/conversations", TestContext.Current.CancellationToken);
@@ -274,8 +291,9 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, _userId, Guid.NewGuid(), "Shape Test"));
-        await SendCommand(new SendMessageCommand(conversationId, "Hello", ChatRole.User));
+        var persona = await CreatePersonaAsync();
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Shape Test"));
+        await SendMessage(conversationId, "Hello", ChatRole.User);
 
         // Act
         var response = await _client.GetAsync("/api/conversations", TestContext.Current.CancellationToken);
@@ -298,10 +316,11 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, _userId, Guid.NewGuid(), "Chat"));
-        await SendCommand(new SendMessageCommand(conversationId, "First", ChatRole.User));
-        await SendCommand(new SendMessageCommand(conversationId, "Second", ChatRole.User));
-        await SendCommand(new SendMessageCommand(conversationId, "Third", ChatRole.User));
+        var persona = await CreatePersonaAsync();
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
+        await SendMessage(conversationId, "First", ChatRole.User);
+        await SendMessage(conversationId, "Second", ChatRole.User);
+        await SendMessage(conversationId, "Third", ChatRole.User);
 
         // Act
         var response = await _client.GetAsync($"/api/conversations/{conversationId}/messages", TestContext.Current.CancellationToken);
@@ -337,8 +356,11 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, Guid.NewGuid(), Guid.NewGuid(), "Not Mine"));
-        await SendCommand(new SendMessageCommand(conversationId, "Secret", ChatRole.User));
+        var otherUserId = Guid.NewGuid();
+        var otherPersona = await CreatePersonaForUserAsync(otherUserId, "Other User Persona");
+        await SendCommandAs(otherUserId, new CreateConversationCommand(conversationId, otherUserId, otherPersona.Id, "Not Mine"));
+        await ConversationSeeder.SendMessageAsync(
+            _factory.Services, conversationId, "Secret", ChatRole.User, ct: TestContext.Current.CancellationToken);
 
         // Act
         var response = await _client.GetAsync(
@@ -354,8 +376,9 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
     {
         // Arrange
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, _userId, Guid.NewGuid(), "Chat"));
-        await SendCommand(new SendMessageCommand(conversationId, "Hello!", ChatRole.User));
+        var persona = await CreatePersonaAsync();
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
+        await SendMessage(conversationId, "Hello!", ChatRole.User);
 
         // Act
         var response = await _client.GetAsync($"/api/conversations/{conversationId}/messages", TestContext.Current.CancellationToken);
@@ -380,12 +403,14 @@ public class ConversationEndpointTests : IClassFixture<ApiTestFactory>
         // Arrange
         var conversationA = Guid.NewGuid();
         var conversationB = Guid.NewGuid();
+        var personaA = await CreatePersonaAsync();
+        var personaB = await CreatePersonaAsync();
 
-        await SendCommand(new CreateConversationCommand(conversationA, _userId, Guid.NewGuid(), "Chat A"));
-        await SendCommand(new CreateConversationCommand(conversationB, _userId, Guid.NewGuid(), "Chat B"));
+        await SendCommand(new CreateConversationCommand(conversationA, _userId, personaA.Id, "Chat A"));
+        await SendCommand(new CreateConversationCommand(conversationB, _userId, personaB.Id, "Chat B"));
 
-        await SendCommand(new SendMessageCommand(conversationA, "Message A", ChatRole.User));
-        await SendCommand(new SendMessageCommand(conversationB, "Message B", ChatRole.User));
+        await SendMessage(conversationA, "Message A", ChatRole.User);
+        await SendMessage(conversationB, "Message B", ChatRole.User);
 
         // Act
         var response = await _client.GetAsync($"/api/conversations/{conversationA}/messages", TestContext.Current.CancellationToken);

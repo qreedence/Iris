@@ -28,11 +28,13 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
         _client = factory.CreateAuthenticatedClient(_userId);
     }
 
-    private async Task SendCommand<TResponse>(IRequest<TResponse> command)
+    private Task SendCommand<TResponse>(IRequest<TResponse> command) => SendCommandAs(_userId, command);
+
+    private async Task SendCommandAs<TResponse>(Guid userId, IRequest<TResponse> command)
     {
         using var scope = _factory.Services.CreateScope();
         var userService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
-        userService.OverrideUserId = _userId;
+        userService.OverrideUserId = userId;
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
         await mediator.Send(command, TestContext.Current.CancellationToken);
     }
@@ -40,12 +42,13 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
     private async Task<PersonaDto> CreatePersonaAsync(
         string name = "Iris",
         SystemPromptSectionsRequest? systemPrompt = null,
-        string? modelPreference = null)
+        string? modelPreference = null,
+        Guid? userId = null)
     {
         using var scope = _factory.Services.CreateScope();
         var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
         return await personaService.CreateAsync(
-            _userId,
+            userId ?? _userId,
             new CreatePersonaRequest(name, systemPrompt, ModelPreference: modelPreference),
             TestContext.Current.CancellationToken);
     }
@@ -92,8 +95,9 @@ public class ChatEndpointTests : IClassFixture<ApiTestFactory>
     {
         // Arrange
         var otherUserId = Guid.NewGuid();
+        var otherPersona = await CreatePersonaAsync(userId: otherUserId);
         var conversationId = Guid.NewGuid();
-        await SendCommand(new CreateConversationCommand(conversationId, otherUserId, Guid.NewGuid(), "Not Mine"));
+        await SendCommandAs(otherUserId, new CreateConversationCommand(conversationId, otherUserId, otherPersona.Id, "Not Mine"));
 
         // Count events before
         using var scopeBefore = _factory.Services.CreateScope();

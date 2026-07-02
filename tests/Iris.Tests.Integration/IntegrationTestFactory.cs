@@ -1,11 +1,11 @@
 using Iris.Application;
 using Iris.Application.AiIntegration;
-using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations;
 using Iris.Application.Identity.Interfaces;
 using Iris.Application.Personas;
 using Iris.Infrastructure;
 using Iris.Infrastructure.Persistence;
+using Iris.Infrastructure.Personas;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
@@ -30,10 +30,7 @@ public class IntegrationTestFactory : IAsyncLifetime
 
     private static IChatProvider CreateDefaultMockChatProvider()
     {
-        var mock = Substitute.For<IChatProvider>();
-        mock.CompleteAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new ChatResponse("Mock AI response", new UsageInfo(10, 5, 15)));
-        return mock;
+        return Substitute.For<IChatProvider>();
     }
 
     /// <summary>
@@ -67,6 +64,7 @@ public class IntegrationTestFactory : IAsyncLifetime
             new TestGlobalSystemPromptProvider("Test app context", "Test guidelines"));
         services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(EfEventStore).Assembly));
         services.AddScoped<IEventStore, EfEventStore>();
+        services.AddScoped<IPersonaService, PersonaService>();
         services.AddSingleton(MockChatProvider);
 
         return services.BuildServiceProvider();

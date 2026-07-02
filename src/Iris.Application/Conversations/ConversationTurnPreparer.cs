@@ -30,9 +30,6 @@ public class ConversationTurnPreparer : IConversationTurnPreparer
         ModelParameters? modelParameters,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(requestedModel))
-            throw new ValidationException("Model can not be empty.");
-
         var events = await _eventStore.LoadStreamAsync(conversationId, ct);
         if (events.Count == 0)
             throw new NotFoundException("Conversation does not exist.");
