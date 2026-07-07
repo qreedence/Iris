@@ -2,6 +2,7 @@ using System.Text.Json;
 using Iris.Application.Conversations.Queries;
 using Iris.Application.Exceptions;
 using Iris.Domain.AiIntegration;
+using Iris.Domain.Conversations.Content;
 using Iris.Domain.Conversations.Entities;
 using Iris.Domain.Conversations.Events;
 using MediatR;
@@ -48,7 +49,7 @@ public class StartConversationTurnHandler : IRequestHandler<StartConversationTur
         var message = new MessageSent(
             Guid.NewGuid(),
             command.ConversationId,
-            command.UserMessage,
+            MessageContentBlocks.Text(command.UserMessage),
             ChatRole.User);
 
         // INVARIANT: AddPending must run BEFORE RecordAsync. Both operate on the

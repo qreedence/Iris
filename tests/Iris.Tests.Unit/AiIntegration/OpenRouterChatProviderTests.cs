@@ -2,6 +2,7 @@ using FluentAssertions;
 using Iris.Application.AiIntegration.Exceptions;
 using Iris.Application.AiIntegration.Models;
 using Iris.Domain.AiIntegration;
+using Iris.Domain.Conversations.Content;
 using Iris.Infrastructure.AiIntegration;
 using System.Net;
 using System.Text;
@@ -20,7 +21,7 @@ public class OpenRouterChatProviderTests
     {
         return new ChatRequest(
             Model: model,
-            Messages: [new ChatMessage(ChatRole.User, "Hello")],
+            Messages: [new ChatMessage(ChatRole.User, MessageContentBlocks.Text("Hello"))],
             SystemPrompt: systemPrompt,
             ModelParameters: modelParameters
         );
@@ -37,6 +38,14 @@ public class OpenRouterChatProviderTests
 
     private static string DeltaEvent(string text) =>
         $"event: response.output_text.delta\ndata: {{\"type\":\"response.output_text.delta\",\"delta\":\"{text}\"}}";
+
+    private static string ReasoningDeltaEvent(string text) =>
+        $"event: response.reasoning.delta\ndata: {{\"type\":\"response.reasoning.delta\",\"delta\":\"{text}\"}}";
+
+    private static string ReasoningDetailsEvent(string text, string id = "reasoning-text-1") =>
+        "data: {\"choices\":[{\"delta\":{\"reasoning_details\":[" +
+        $"{{\"type\":\"reasoning.text\",\"text\":\"{text}\",\"signature\":\"sig-123\",\"id\":\"{id}\",\"format\":\"anthropic-claude-v1\",\"index\":0}}" +
+        "]}}]}";
 
     private static string CompletedEvent(int input = 10, int output = 5, int total = 15) =>
         $"event: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":{{\"usage\":{{\"input_tokens\":{input},\"output_tokens\":{output},\"total_tokens\":{total}}}}}}}";
@@ -95,6 +104,73 @@ public class OpenRouterChatProviderTests
     }
 
     [Fact]
+    public async Task StreamAsync_ReasoningDelta_YieldsThinkingChunk()
+    {
+        var response = CreateStreamResponse(
+            ReasoningDeltaEvent("Let me think"),
+            DeltaEvent("Answer"),
+            CompletedEvent());
+        var (sut, _) = CreateProvider(response);
+
+        var chunks = new List<StreamedChunk>();
+        await foreach (var chunk in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+            chunks.Add(chunk);
+
+        chunks[0].BlockType.Should().Be(ContentBlockType.Thinking);
+        chunks[0].BlockIndex.Should().Be(0);
+        chunks[0].Content.Should().Be("Let me think");
+
+        chunks[1].BlockType.Should().Be(ContentBlockType.Text);
+        chunks[1].BlockIndex.Should().Be(1);
+        chunks[1].Content.Should().Be("Answer");
+    }
+
+    [Fact]
+    public async Task StreamAsync_RepeatedBlockTypes_ReusesOneBlockIndexPerBlockType()
+    {
+        var response = CreateStreamResponse(
+            ReasoningDeltaEvent("Think "),
+            ReasoningDeltaEvent("again"),
+            DeltaEvent("Answer "),
+            DeltaEvent("now"),
+            CompletedEvent());
+        var (sut, _) = CreateProvider(response);
+
+        var chunks = new List<StreamedChunk>();
+        await foreach (var chunk in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+            chunks.Add(chunk);
+
+        chunks.Take(4).Select(c => c.BlockType).Should().Equal(
+            ContentBlockType.Thinking,
+            ContentBlockType.Thinking,
+            ContentBlockType.Text,
+            ContentBlockType.Text);
+        chunks.Take(4).Select(c => c.BlockIndex).Should().Equal(0, 0, 1, 1);
+    }
+
+    [Fact]
+    public async Task StreamAsync_ReasoningDetails_PreservesProviderMetadata()
+    {
+        var response = CreateStreamResponse(
+            ReasoningDetailsEvent("Reasoning text"),
+            DeltaEvent("Answer"),
+            CompletedEvent());
+        var (sut, _) = CreateProvider(response);
+
+        var chunks = new List<StreamedChunk>();
+        await foreach (var chunk in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+            chunks.Add(chunk);
+
+        var thinking = chunks[0];
+        thinking.BlockType.Should().Be(ContentBlockType.Thinking);
+        thinking.Content.Should().Be("Reasoning text");
+        thinking.ProviderMetadata.Should().NotBeNull();
+        var metadata = thinking.ProviderMetadata![0];
+        metadata["type"].Should().Be("reasoning.text");
+        metadata["signature"].Should().Be("sig-123");
+    }
+
+    [Fact]
     public async Task StreamAsync_FinalChunk_HasIsComplete()
     {
         var response = CreateStreamResponse(
@@ -127,6 +203,83 @@ public class OpenRouterChatProviderTests
         final.UsageInfo!.InputTokens.Should().Be(20);
         final.UsageInfo.OutputTokens.Should().Be(10);
         final.UsageInfo.TotalTokens.Should().Be(30);
+    }
+
+    [Fact]
+    public async Task StreamAsync_Request_PassesBackPreservedReasoningDetails()
+    {
+        var metadata = new Dictionary<string, object?>
+        {
+            ["type"] = "reasoning.text",
+            ["text"] = "preserved reasoning",
+            ["signature"] = "sig-123",
+            ["id"] = "reasoning-text-1",
+            ["format"] = "anthropic-claude-v1",
+            ["index"] = 0
+        };
+        var request = new ChatRequest(
+            "test/model",
+            [
+                new ChatMessage(
+                    ChatRole.Assistant,
+                    [
+                        MessageContentBlock.Thinking("preserved reasoning", [metadata]),
+                        MessageContentBlock.Text("Final answer")
+                    ]),
+                new ChatMessage(ChatRole.User, MessageContentBlocks.Text("Continue"))
+            ]);
+
+        var response = CreateStreamResponse(CompletedEvent());
+        var (sut, handler) = CreateProvider(response);
+
+        await foreach (var _ in sut.StreamAsync(request, TestContext.Current.CancellationToken))
+        {
+        }
+
+        handler.LastRequestBody.Should().NotBeNull();
+        using var body = JsonDocument.Parse(handler.LastRequestBody!);
+        var assistantMessage = body.RootElement.GetProperty("input")[0];
+
+        assistantMessage.GetProperty("content").GetString().Should().Be("Final answer");
+        var reasoningDetails = assistantMessage.GetProperty("reasoning_details");
+        reasoningDetails.ValueKind.Should().Be(JsonValueKind.Array);
+        reasoningDetails[0].GetProperty("type").GetString().Should().Be("reasoning.text");
+        reasoningDetails[0].GetProperty("signature").GetString().Should().Be("sig-123");
+    }
+
+    [Fact]
+    public async Task StreamAsync_Request_PassesBackReasoningDetailsAfterJsonRoundTrip()
+    {
+        var metadata = JsonSerializer.Deserialize<Dictionary<string, object?>>(
+            "{\"type\":\"reasoning.text\",\"text\":\"persisted reasoning\",\"signature\":\"sig-456\",\"id\":\"reasoning-text-2\",\"format\":\"anthropic-claude-v1\",\"index\":0}")!;
+        var request = new ChatRequest(
+            "test/model",
+            [
+                new ChatMessage(
+                    ChatRole.Assistant,
+                    [
+                        MessageContentBlock.Thinking("persisted reasoning", [metadata]),
+                        MessageContentBlock.Text("Final answer")
+                    ]),
+                new ChatMessage(ChatRole.User, MessageContentBlocks.Text("Continue"))
+            ]);
+
+        var response = CreateStreamResponse(CompletedEvent());
+        var (sut, handler) = CreateProvider(response);
+
+        await foreach (var _ in sut.StreamAsync(request, TestContext.Current.CancellationToken))
+        {
+        }
+
+        handler.LastRequestBody.Should().NotBeNull();
+        using var body = JsonDocument.Parse(handler.LastRequestBody!);
+        var assistantMessage = body.RootElement.GetProperty("input")[0];
+        var reasoningDetails = assistantMessage.GetProperty("reasoning_details");
+
+        reasoningDetails.ValueKind.Should().Be(JsonValueKind.Array);
+        reasoningDetails[0].GetProperty("type").GetString().Should().Be("reasoning.text");
+        reasoningDetails[0].GetProperty("text").GetString().Should().Be("persisted reasoning");
+        reasoningDetails[0].GetProperty("signature").GetString().Should().Be("sig-456");
     }
 
     [Fact]

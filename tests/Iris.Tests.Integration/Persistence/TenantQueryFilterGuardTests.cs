@@ -7,6 +7,7 @@ using Iris.Infrastructure.Persistence;
 using Iris.Tests.Integration.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Iris.Domain.Conversations.Content;
 
 namespace Iris.Tests.Integration.Persistence;
 
@@ -181,9 +182,89 @@ public class TenantQueryFilterGuardTests
             .ToListAsync(TestContext.Current.CancellationToken);
 
         // Assert
-        messages.Should().ContainSingle(m => m.Content == "User A's private message",
+        messages.Should().ContainSingle(m => MessageContentBlocks.ToVisibleText(m.ContentBlocks) == "User A's private message",
             "ConversationMessages is intentionally unfiltered; isolation for it comes from " +
             "ConversationQueries.GetMessagesAsync's ExistsForUserAsync pre-check, not a query filter");
+    }
+
+    // ── Uploads ───────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Uploads_QueryFilter_HidesOtherUsersRowUnlessIgnored()
+    {
+        var uploadId = Guid.NewGuid();
+
+        using (var seedScope = CreateScopeAs(_userA))
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Uploads.Add(new Upload
+            {
+                Id = uploadId,
+                UserId = _userA,
+                Status = UploadStatus.Confirmed,
+                ContentType = "image/png",
+                StorageKey = $"uploads/{uploadId}.png",
+                SizeBytes = 1234,
+                OriginalFileName = "thinking.png",
+                CreatedAt = DateTimeOffset.UtcNow,
+                ConfirmedAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        using var scope = CreateScopeAs(_userB);
+        var readDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var filtered = await readDb.Uploads
+            .Where(u => u.Id == uploadId)
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        var unfiltered = await readDb.Uploads
+            .IgnoreQueryFilters()
+            .Where(u => u.Id == uploadId)
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        filtered.Should().BeEmpty("the Upload query filter should hide user A's uploaded payloads from user B");
+        unfiltered.Should().ContainSingle(u => u.UserId == _userA,
+            "the row genuinely exists — IgnoreQueryFilters proves the filter, not missing data, is what hid it");
+    }
+
+    // ── ToolResultPayloads — intentionally NOT filtered ───────────
+
+    [Fact]
+    public async Task ToolResultPayloads_HasNoQueryFilter_OtherUsersRowsAreVisibleWithoutIgnoreQueryFilters()
+    {
+        // Tool result payloads are conversation-scoped payload storage. Like
+        // ConversationMessages, direct DbSet access is intentionally unfiltered;
+        // tenant isolation belongs at the conversation command/query boundary.
+        var personaId = await CreatePersonaAsync(_userA);
+        var conversationId = await CreateConversationAsync(_userA, personaId);
+        var payloadId = Guid.NewGuid();
+
+        using (var seedScope = CreateScopeAs(_userA))
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.ToolResultPayloads.Add(new ToolResultPayload
+            {
+                Id = payloadId,
+                ConversationId = conversationId,
+                ToolCallId = "tool-call-1",
+                PayloadJson = "{\"ok\":true}",
+                Preview = "ok",
+                CreatedAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        using var scope = CreateScopeAs(_userB);
+        var readDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var rows = await readDb.ToolResultPayloads
+            .Where(p => p.Id == payloadId)
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        rows.Should().ContainSingle(p => p.ConversationId == conversationId,
+            "ToolResultPayloads is intentionally unfiltered; isolation comes from the owning conversation access path");
     }
 
     // ── ConversationTurnRequests — intentionally NOT filtered ───────

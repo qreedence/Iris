@@ -1,5 +1,6 @@
-﻿using Iris.Application.Identity.Interfaces;
+using Iris.Application.Identity.Interfaces;
 using Iris.Domain.Conversations;
+using Iris.Domain.Conversations.Content;
 using Iris.Domain.Conversations.Entities;
 using Iris.Domain.Identity.Entities;
 using Iris.Domain.Personas;
@@ -25,6 +26,8 @@ public class AppDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Guid
     public DbSet<ConversationReadModel> ConversationReadModels { get; set; }
     public DbSet<ConversationMessage> ConversationMessages { get; set; }
     public DbSet<ConversationTurnRequest> ConversationTurnRequests { get; set; }
+    public DbSet<Upload> Uploads { get; set; }
+    public DbSet<ToolResultPayload> ToolResultPayloads { get; set; }
     public DbSet<Persona> Personas { get; set; }
     public DbSet<SystemPrompt> SystemPrompts { get; set; }
     public DbSet<RefreshToken> RefreshTokens { get; set; }
@@ -41,5 +44,8 @@ public class AppDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Guid
 
         modelBuilder.Entity<ConversationReadModel>()
             .HasQueryFilter(c => c.UserId == CurrentUserId);
+
+        modelBuilder.Entity<Upload>()
+            .HasQueryFilter(u => u.UserId == CurrentUserId);
     }
 }

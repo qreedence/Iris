@@ -3,6 +3,7 @@ using Iris.Application.Identity.Interfaces;
 using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
 using Microsoft.Extensions.DependencyInjection;
+using Iris.Domain.Conversations.Content;
 
 namespace Iris.Tests.Integration.Helpers;
 
@@ -31,7 +32,7 @@ public static class ConversationSeeder
         }
 
         var eventRecorder = scope.ServiceProvider.GetRequiredService<IConversationEventRecorder>();
-        var message = new MessageSent(Guid.NewGuid(), conversationId, content, role);
+        var message = new MessageSent(Guid.NewGuid(), conversationId, MessageContentBlocks.Text(content), role);
         await eventRecorder.RecordAsync(conversationId, [message], ct);
     }
 }

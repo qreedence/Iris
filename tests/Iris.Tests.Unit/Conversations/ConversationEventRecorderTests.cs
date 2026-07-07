@@ -5,6 +5,7 @@ using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
 using MediatR;
 using NSubstitute;
+using Iris.Domain.Conversations.Content;
 
 namespace Iris.Tests.Unit.Conversations;
 
@@ -22,8 +23,8 @@ public class ConversationEventRecorderTests
         var events = new ConversationEvent[]
         {
             new ConversationCreated(aggregateId, Guid.NewGuid(), Guid.NewGuid(), "Chat"),
-            new MessageSent(Guid.NewGuid(), aggregateId, "Hello", ChatRole.User),
-            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, "Hi", "test/model"),
+            new MessageSent(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hello"), ChatRole.User),
+            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hi"), "test/model"),
             new TurnCompleted(aggregateId, 10, 5),
             new TurnFailed(aggregateId, FailureSource.Provider, "provider_error", "Provider failed.", "partial"),
             new TurnCancelled(aggregateId, "partial"),
@@ -152,8 +153,8 @@ public class ConversationEventRecorderTests
         object result = eventType.Name switch
         {
             nameof(ConversationCreated) => new ConversationCreated(aggregateId, Guid.NewGuid(), Guid.NewGuid(), "Chat"),
-            nameof(MessageSent) => new MessageSent(Guid.NewGuid(), aggregateId, "Hello", ChatRole.User),
-            nameof(AssistantResponseCompleted) => new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, "Hi", "test/model"),
+            nameof(MessageSent) => new MessageSent(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hello"), ChatRole.User),
+            nameof(AssistantResponseCompleted) => new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hi"), "test/model"),
             nameof(TurnCompleted) => new TurnCompleted(aggregateId, 10, 5),
             nameof(TurnFailed) => new TurnFailed(aggregateId, FailureSource.Provider, "provider_error", "Provider failed.", "partial"),
             nameof(TurnCancelled) => new TurnCancelled(aggregateId, "partial"),

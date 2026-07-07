@@ -8,6 +8,7 @@ using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using Iris.Domain.Conversations.Content;
 
 namespace Iris.Tests.Unit.Conversations;
 
@@ -47,9 +48,9 @@ public class ChatStreamOrchestratorTests
         var chatRequest = new ChatRequest(
             "test/model",
             [
-                new ChatMessage(ChatRole.User, "First user message"),
-                new ChatMessage(ChatRole.Assistant, "First assistant response"),
-                new ChatMessage(ChatRole.User, "Second user message")
+                new ChatMessage(ChatRole.User, MessageContentBlocks.Text("First user message")),
+                new ChatMessage(ChatRole.Assistant, MessageContentBlocks.Text("First assistant response")),
+                new ChatMessage(ChatRole.User, MessageContentBlocks.Text("Second user message"))
             ],
             "You are Iris.",
             null);
@@ -68,13 +69,83 @@ public class ChatStreamOrchestratorTests
         // Assert
         _chatProvider.Received(1).StreamAsync(chatRequest, Arg.Any<CancellationToken>());
 
-        await _notifier.Received(1).SendChunkAsync(conversationId, "Hello", Arg.Any<CancellationToken>());
-        await _notifier.Received(1).SendChunkAsync(conversationId, " there", Arg.Any<CancellationToken>());
+        await _notifier.Received(1).SendChunkAsync(
+            conversationId,
+            Arg.Is<ChatStreamChunkDto>(chunk =>
+                chunk.ConversationId == conversationId &&
+                chunk.BlockType == ContentBlockType.Text &&
+                chunk.BlockIndex == 0 &&
+                chunk.Content == "Hello"),
+            Arg.Any<CancellationToken>());
+        await _notifier.Received(1).SendChunkAsync(
+            conversationId,
+            Arg.Is<ChatStreamChunkDto>(chunk =>
+                chunk.ConversationId == conversationId &&
+                chunk.BlockType == ContentBlockType.Text &&
+                chunk.BlockIndex == 0 &&
+                chunk.Content == " there"),
+            Arg.Any<CancellationToken>());
         await _notifier.Received(1).SendCompletedAsync(conversationId, Arg.Any<CancellationToken>());
 
         await _eventRecorder.Received(1).RecordAsync(
             conversationId,
             Arg.Is<IEnumerable<ConversationEvent>>(events => ContainsCompletionEvents(events)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StreamAsync_MixedThinkingAndText_RecordsOrderedContentBlocks()
+    {
+        // Arrange
+        var metadata = new Dictionary<string, object?>
+        {
+            ["type"] = "reasoning.text",
+            ["text"] = "Let me think",
+            ["signature"] = "sig-123",
+            ["id"] = "reasoning-text-1",
+            ["format"] = "anthropic-claude-v1",
+            ["index"] = 0
+        };
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        SetupPreparedTurn(conversationId);
+
+        _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => StreamChunks([
+                new StreamedChunk(
+                    "Let me think",
+                    false,
+                    null,
+                    ContentBlockType.Thinking,
+                    0,
+                    [metadata]),
+                new StreamedChunk("Final answer", false, null, ContentBlockType.Text, 1),
+                new StreamedChunk(null, true, new UsageInfo(12, 5, 17))
+            ], call.ArgAt<CancellationToken>(1)));
+
+        // Act
+        await sut.StreamAsync(Guid.NewGuid(), conversationId, Guid.NewGuid(), "test/model", false, null, TestContext.Current.CancellationToken);
+
+        // Assert
+        await _notifier.Received(1).SendChunkAsync(
+            conversationId,
+            Arg.Is<ChatStreamChunkDto>(chunk =>
+                chunk.BlockType == ContentBlockType.Thinking &&
+                chunk.BlockIndex == 0 &&
+                chunk.Content == "Let me think"),
+            Arg.Any<CancellationToken>());
+
+        await _notifier.Received(1).SendChunkAsync(
+            conversationId,
+            Arg.Is<ChatStreamChunkDto>(chunk =>
+                chunk.BlockType == ContentBlockType.Text &&
+                chunk.BlockIndex == 1 &&
+                chunk.Content == "Final answer"),
+            Arg.Any<CancellationToken>());
+
+        await _eventRecorder.Received(1).RecordAsync(
+            conversationId,
+            Arg.Is<IEnumerable<ConversationEvent>>(events => ContainsMixedThinkingAndTextCompletion(events)),
             Arg.Any<CancellationToken>());
     }
 
@@ -128,7 +199,14 @@ public class ChatStreamOrchestratorTests
             Arg.Is<IEnumerable<ConversationEvent>>(events => ContainsRateLimitFailure(events)),
             Arg.Any<CancellationToken>());
 
-        await _notifier.Received(1).SendChunkAsync(conversationId, "partial", Arg.Any<CancellationToken>());
+        await _notifier.Received(1).SendChunkAsync(
+            conversationId,
+            Arg.Is<ChatStreamChunkDto>(chunk =>
+                chunk.ConversationId == conversationId &&
+                chunk.BlockType == ContentBlockType.Text &&
+                chunk.BlockIndex == 0 &&
+                chunk.Content == "partial"),
+            Arg.Any<CancellationToken>());
         await _notifier.Received(1).SendErrorAsync(
             conversationId,
             "rate_limited",
@@ -162,7 +240,14 @@ public class ChatStreamOrchestratorTests
             Arg.Is<IEnumerable<ConversationEvent>>(events => ContainsCancellation(events)),
             CancellationToken.None);
 
-        await _notifier.Received(1).SendChunkAsync(conversationId, "partial", Arg.Any<CancellationToken>());
+        await _notifier.Received(1).SendChunkAsync(
+            conversationId,
+            Arg.Is<ChatStreamChunkDto>(chunk =>
+                chunk.ConversationId == conversationId &&
+                chunk.BlockType == ContentBlockType.Text &&
+                chunk.BlockIndex == 0 &&
+                chunk.Content == "partial"),
+            Arg.Any<CancellationToken>());
         await _notifier.DidNotReceive().SendErrorAsync(
             Arg.Any<Guid>(),
             Arg.Any<string>(),
@@ -223,7 +308,14 @@ public class ChatStreamOrchestratorTests
             Arg.Is<IEnumerable<ConversationEvent>>(events => ContainsInternalFailure(events)),
             CancellationToken.None);
 
-        await _notifier.Received(1).SendChunkAsync(conversationId, "partial", Arg.Any<CancellationToken>());
+        await _notifier.Received(1).SendChunkAsync(
+            conversationId,
+            Arg.Is<ChatStreamChunkDto>(chunk =>
+                chunk.ConversationId == conversationId &&
+                chunk.BlockType == ContentBlockType.Text &&
+                chunk.BlockIndex == 0 &&
+                chunk.Content == "partial"),
+            Arg.Any<CancellationToken>());
         await _notifier.Received(1).SendErrorAsync(
             conversationId,
             "internal_error",
@@ -282,7 +374,7 @@ public class ChatStreamOrchestratorTests
     private static ChatRequest CreateChatRequest(string model = "test/model") =>
         new(
             model,
-            [new ChatMessage(ChatRole.User, "Hello")],
+            [new ChatMessage(ChatRole.User, MessageContentBlocks.Text("Hello"))],
             null,
             null);
 
@@ -292,11 +384,31 @@ public class ChatStreamOrchestratorTests
         var response = eventList.OfType<AssistantResponseCompleted>().SingleOrDefault();
         var turn = eventList.OfType<TurnCompleted>().SingleOrDefault();
 
-        return response?.Content == "Hello there" &&
+        return response is not null &&
+            MessageContentBlocks.ToVisibleText(response.ContentBlocks) == "Hello there" &&
             response.Model == "test/model" &&
             turn?.InputTokens == 12 &&
             turn.OutputTokens == 5 &&
             eventList.All(e => e is not MessageSent);
+    }
+
+    private static bool ContainsMixedThinkingAndTextCompletion(IEnumerable<ConversationEvent> events)
+    {
+        var response = events.OfType<AssistantResponseCompleted>().SingleOrDefault();
+        if (response is null)
+            return false;
+
+        if (response.ContentBlocks.Count != 2)
+            return false;
+
+        var thinking = response.ContentBlocks[0];
+        var text = response.ContentBlocks[1];
+
+        return thinking.Type == ContentBlockType.Thinking &&
+            thinking.Content == "Let me think" &&
+            thinking.ProviderMetadata?[0]["signature"] as string == "sig-123" &&
+            text.Type == ContentBlockType.Text &&
+            text.Content == "Final answer";
     }
 
     private static bool ContainsRateLimitFailure(IEnumerable<ConversationEvent> events)

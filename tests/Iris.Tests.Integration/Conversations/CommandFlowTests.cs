@@ -7,6 +7,7 @@ using Iris.Domain.Conversations.Events;
 using Iris.Infrastructure.Persistence;
 using Iris.Tests.Integration.Helpers;
 using MediatR;
+using Iris.Domain.Conversations.Content;
 
 namespace Iris.Tests.Integration.Conversations;
 
@@ -124,7 +125,7 @@ public class CommandFlowTests
 
         var message = stream[1].Should().BeOfType<MessageSent>().Subject;
         message.ConversationId.Should().Be(conversationId);
-        message.Content.Should().Be("Hello, Iris!");
+        MessageContentBlocks.ToVisibleText(message.ContentBlocks).Should().Be("Hello, Iris!");
         message.Role.Should().Be(ChatRole.User);
     }
 
@@ -151,9 +152,9 @@ public class CommandFlowTests
         stream[0].Should().BeOfType<ConversationCreated>();
 
         var messages = stream.Skip(1).Cast<MessageSent>().ToList();
-        messages[0].Content.Should().Be("First message");
-        messages[1].Content.Should().Be("Second message");
-        messages[2].Content.Should().Be("Third message");
+        MessageContentBlocks.ToVisibleText(messages[0].ContentBlocks).Should().Be("First message");
+        MessageContentBlocks.ToVisibleText(messages[1].ContentBlocks).Should().Be("Second message");
+        MessageContentBlocks.ToVisibleText(messages[2].ContentBlocks).Should().Be("Third message");
     }
 
     // ── §4 Conversation isolation ─────────────────────────────────

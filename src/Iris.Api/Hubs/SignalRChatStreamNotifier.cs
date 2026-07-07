@@ -12,11 +12,11 @@ public class SignalRChatStreamNotifier : IChatStreamNotifier
         _hubContext = hubContext;
     }
 
-    public Task SendChunkAsync(Guid conversationId, string content, CancellationToken ct = default)
+    public Task SendChunkAsync(Guid conversationId, ChatStreamChunkDto chunk, CancellationToken ct = default)
     {
         return _hubContext.Clients
             .Group(ConversationGroups.For(conversationId))
-            .ReceiveChunk(content);
+            .ReceiveChunk(chunk);
     }
 
     public Task SendErrorAsync(Guid conversationId, string errorCode, string message, CancellationToken ct = default)

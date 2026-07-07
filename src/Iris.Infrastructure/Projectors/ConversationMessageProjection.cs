@@ -1,4 +1,5 @@
 using Iris.Domain.AiIntegration;
+using Iris.Domain.Conversations.Content;
 using Iris.Domain.Conversations.Entities;
 using Iris.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -18,7 +19,7 @@ namespace Iris.Infrastructure.Projectors
             Guid messageId,
             Guid conversationId,
             ChatRole role,
-            string content,
+            IReadOnlyList<MessageContentBlock> contentBlocks,
             DateTimeOffset occurredAt,
             CancellationToken ct)
         {
@@ -30,7 +31,7 @@ namespace Iris.Infrastructure.Projectors
                 Id = messageId,
                 ConversationId = conversationId,
                 Role = role,
-                Content = content,
+                ContentBlocks = contentBlocks.ToList(),
                 CreatedAt = occurredAt
             };
             db.ConversationMessages.Add(message);

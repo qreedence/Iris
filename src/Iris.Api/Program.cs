@@ -11,6 +11,8 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using System.Text.Json;
+using Iris.Domain.Conversations.Content;
 using System.Text.Json.Serialization;
 
 const string chatHubRoute = "/hubs/chat";
@@ -88,11 +90,17 @@ builder.Services
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter<ContentBlockType>(JsonNamingPolicy.SnakeCaseLower));
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     });
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
-builder.Services.AddSignalR();
+builder.Services.AddSignalR()
+    .AddJsonProtocol(options =>
+    {
+        options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter<ContentBlockType>(JsonNamingPolicy.SnakeCaseLower));
+        options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    });
 builder.Services.AddScoped<IChatStreamNotifier, SignalRChatStreamNotifier>();
 builder.Services.AddOptions<TurnProcessingOptions>()
     .Bind(builder.Configuration.GetSection(TurnProcessingOptions.SectionName))
