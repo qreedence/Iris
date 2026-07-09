@@ -6,7 +6,7 @@ public interface IChatClient
 {
     Task ReceiveChunk(ChatStreamChunkDto chunk);
 
-    Task ReceiveError(string errorCode, string message);
+    Task ReceiveError(ChatStreamErrorDto error);
 
-    Task StreamCompleted();
+    Task StreamCompleted(ChatStreamCompletedDto completed);
 }

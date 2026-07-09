@@ -23,13 +23,13 @@ public class SignalRChatStreamNotifier : IChatStreamNotifier
     {
         return _hubContext.Clients
             .Group(ConversationGroups.For(conversationId))
-            .ReceiveError(errorCode, message);
+            .ReceiveError(new ChatStreamErrorDto(conversationId, errorCode, message));
     }
 
     public Task SendCompletedAsync(Guid conversationId, CancellationToken ct = default)
     {
         return _hubContext.Clients
             .Group(ConversationGroups.For(conversationId))
-            .StreamCompleted();
+            .StreamCompleted(new ChatStreamCompletedDto(conversationId));
     }
 }
