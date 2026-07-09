@@ -2,6 +2,7 @@ using Iris.Application.AiIntegration.Models;
 using Iris.Application.Exceptions;
 using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
+using Iris.Domain.Conversations.Content;
 using Iris.Domain.Conversations.Events;
 using Microsoft.Extensions.Logging;
 
@@ -112,10 +113,14 @@ public class ConversationTurnPreparer : IConversationTurnPreparer
             switch (evt)
             {
                 case MessageSent messageSent:
-                    messages.Add(new ChatMessage(messageSent.Role, messageSent.Content));
+                    messages.Add(new ChatMessage(
+                        messageSent.Role,
+                        messageSent.ContentBlocks));
                     break;
                 case AssistantResponseCompleted assistantResponseCompleted:
-                    messages.Add(new ChatMessage(ChatRole.Assistant, assistantResponseCompleted.Content));
+                    messages.Add(new ChatMessage(
+                        ChatRole.Assistant,
+                        assistantResponseCompleted.ContentBlocks));
                     break;
             }
         }

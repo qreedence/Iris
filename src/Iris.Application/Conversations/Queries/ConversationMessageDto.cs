@@ -1,4 +1,5 @@
 using Iris.Domain.AiIntegration;
+using Iris.Domain.Conversations.Content;
 
 namespace Iris.Application.Conversations.Queries;
 
@@ -6,5 +7,5 @@ public record ConversationMessageDto(
     Guid Id,
     Guid ConversationId,
     ChatRole Role,
-    string Content,
+    IReadOnlyList<MessageContentBlock> ContentBlocks,
     DateTimeOffset CreatedAt);

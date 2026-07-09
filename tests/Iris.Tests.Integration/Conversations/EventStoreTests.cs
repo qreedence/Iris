@@ -3,6 +3,8 @@ using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
 using Iris.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Iris.Domain.Conversations.Content;
+using System.Text.Json;
 
 namespace Iris.Tests.Integration.Conversations;
 
@@ -66,8 +68,8 @@ public class EventStoreTests
         var events = new ConversationEvent[]
         {
             new ConversationCreated(aggregateId, Guid.NewGuid(), Guid.NewGuid(), "Chat"),
-            new MessageSent(Guid.NewGuid(), aggregateId, "Hello", ChatRole.User),
-            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, "Hi there!", "test/model"),
+            new MessageSent(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hello"), ChatRole.User),
+            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hi there!"), "test/model"),
         };
 
         // Act
@@ -113,8 +115,8 @@ public class EventStoreTests
         ], commandId, TestContext.Current.CancellationToken);
 
         await sut.AppendAsync(aggregateId, [
-            new MessageSent(Guid.NewGuid(), aggregateId, "Hello", ChatRole.User),
-            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, "Hi!", "test/model"),
+            new MessageSent(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hello"), ChatRole.User),
+            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hi!"), "test/model"),
         ], Guid.NewGuid(), TestContext.Current.CancellationToken);
 
         // Act — use a fresh context to ensure we're reading from DB
@@ -158,12 +160,12 @@ public class EventStoreTests
 
         await sut.AppendAsync(aggregateA, [
             new ConversationCreated(aggregateA, Guid.NewGuid(), Guid.NewGuid(), "Chat A"),
-            new MessageSent(Guid.NewGuid(), aggregateA, "Hello from A", ChatRole.User),
+            new MessageSent(Guid.NewGuid(), aggregateA, MessageContentBlocks.Text("Hello from A"), ChatRole.User),
         ], Guid.NewGuid(), TestContext.Current.CancellationToken);
 
         await sut.AppendAsync(aggregateB, [
             new ConversationCreated(aggregateB, Guid.NewGuid(), Guid.NewGuid(), "Chat B"),
-            new MessageSent(Guid.NewGuid(), aggregateB, "Hello from B", ChatRole.User),
+            new MessageSent(Guid.NewGuid(), aggregateB, MessageContentBlocks.Text("Hello from B"), ChatRole.User),
         ], Guid.NewGuid(), TestContext.Current.CancellationToken);
 
         // Act
@@ -227,8 +229,8 @@ public class EventStoreTests
         var original = new ConversationEvent[]
         {
             new ConversationCreated(aggregateId, Guid.NewGuid(), personaId, "My Chat"),
-            new MessageSent(Guid.NewGuid(), aggregateId, "What is the meaning of life?", ChatRole.User),
-            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, "42, obviously.", "anthropic/claude-sonnet-4"),
+            new MessageSent(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("What is the meaning of life?"), ChatRole.User),
+            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("42, obviously."), "anthropic/claude-sonnet-4"),
             new TurnCompleted(aggregateId, 150, 42),
             new TurnFailed(aggregateId, FailureSource.Provider, "rate_limited", "Rate limit exceeded.", "partial answer"),
             new TurnCancelled(aggregateId, "cancelled partial"),
@@ -252,11 +254,11 @@ public class EventStoreTests
         created.Title.Should().Be("My Chat");
 
         var message = stream[1].Should().BeOfType<MessageSent>().Subject;
-        message.Content.Should().Be("What is the meaning of life?");
+        MessageContentBlocks.ToVisibleText(message.ContentBlocks).Should().Be("What is the meaning of life?");
         message.Role.Should().Be(ChatRole.User);
 
         var response = stream[2].Should().BeOfType<AssistantResponseCompleted>().Subject;
-        response.Content.Should().Be("42, obviously.");
+        MessageContentBlocks.ToVisibleText(response.ContentBlocks).Should().Be("42, obviously.");
         response.Model.Should().Be("anthropic/claude-sonnet-4");
 
         var turn = stream[3].Should().BeOfType<TurnCompleted>().Subject;
@@ -278,6 +280,42 @@ public class EventStoreTests
 
         var archived = stream[7].Should().BeOfType<ConversationArchived>().Subject;
         archived.ConversationId.Should().Be(aggregateId);
+    }
+
+    [Fact]
+    public async Task AppendAsync_ContentBlockTypes_AreStoredAsSnakeCaseJson()
+    {
+        await using var db = _factory.CreateDbContext();
+        var sut = CreateSut(db);
+        var aggregateId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+
+        await sut.AppendAsync(
+            aggregateId,
+            [
+                new AssistantResponseCompleted(
+                    messageId,
+                    aggregateId,
+                    [
+                        MessageContentBlock.Thinking("Let me think"),
+                        MessageContentBlock.Text("Answer")
+                    ],
+                    "test/model")
+            ],
+            Guid.NewGuid(),
+            TestContext.Current.CancellationToken);
+
+        await using var verifyDb = _factory.CreateDbContext();
+        var stored = await verifyDb.StoredEvents
+            .SingleAsync(e => e.AggregateId == aggregateId, TestContext.Current.CancellationToken);
+
+        using var eventJson = JsonDocument.Parse(stored.EventData);
+        var contentBlocks = eventJson.RootElement.GetProperty("contentBlocks");
+
+        contentBlocks[0].GetProperty("type").GetString().Should().Be("thinking");
+        contentBlocks[1].GetProperty("type").GetString().Should().Be("text");
+        stored.EventData.Should().NotContain("\"Thinking\"");
+        stored.EventData.Should().NotContain("\"Text\"");
     }
 
     [Fact]
@@ -342,11 +380,11 @@ public class EventStoreTests
         // Act — two separate appends
         await sut.AppendAsync(aggregateId, [
             new ConversationCreated(aggregateId, Guid.NewGuid(), Guid.NewGuid(), "Chat"),
-            new MessageSent(Guid.NewGuid(), aggregateId, "Hello", ChatRole.User),
+            new MessageSent(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hello"), ChatRole.User),
         ], Guid.NewGuid(), TestContext.Current.CancellationToken);
 
         await sut.AppendAsync(aggregateId, [
-            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, "Hi!", "test/model"),
+            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hi!"), "test/model"),
             new TurnCompleted(aggregateId, 10, 5),
         ], Guid.NewGuid(), TestContext.Current.CancellationToken);
 

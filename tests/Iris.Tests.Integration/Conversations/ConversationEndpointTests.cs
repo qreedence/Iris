@@ -9,8 +9,11 @@ using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Conversations.Queries;
 using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
+using Iris.Domain.Conversations.Events;
 using Iris.Tests.Integration.Helpers;
 using MediatR;
+using Iris.Domain.Conversations.Content;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Iris.Tests.Integration.Conversations;
 
@@ -20,7 +23,11 @@ public class ConversationEndpointTests
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
-        Converters = { new JsonStringEnumConverter() }
+        Converters =
+        {
+            new JsonStringEnumConverter<ContentBlockType>(JsonNamingPolicy.SnakeCaseLower),
+            new JsonStringEnumConverter()
+        }
     };
 
     private readonly Guid _userId = Guid.NewGuid();
@@ -296,9 +303,9 @@ public class ConversationEndpointTests
             .ReadFromJsonAsync<List<ConversationMessageDto>>(JsonOptions, TestContext.Current.CancellationToken);
 
         messages.Should().HaveCount(3);
-        messages![0].Content.Should().Be("First");
-        messages[1].Content.Should().Be("Second");
-        messages[2].Content.Should().Be("Third");
+        MessageContentBlocks.ToVisibleText(messages![0].ContentBlocks).Should().Be("First");
+        MessageContentBlocks.ToVisibleText(messages[1].ContentBlocks).Should().Be("Second");
+        MessageContentBlocks.ToVisibleText(messages[2].ContentBlocks).Should().Be("Third");
     }
 
     // ── §5 GET /api/conversations/{id}/messages — 404 ─────────────
@@ -355,8 +362,48 @@ public class ConversationEndpointTests
         message.Id.Should().NotBe(Guid.Empty);
         message.ConversationId.Should().Be(conversationId);
         message.Role.Should().Be(ChatRole.User);
-        message.Content.Should().Be("Hello!");
+        MessageContentBlocks.ToVisibleText(message.ContentBlocks).Should().Be("Hello!");
         message.CreatedAt.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
+    public async Task GetMessages_ContentBlockTypes_AreReturnedAsSnakeCaseJson()
+    {
+        // Arrange
+        var conversationId = Guid.NewGuid();
+        var persona = await CreatePersonaAsync();
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, persona.Id, "Chat"));
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var recorder = scope.ServiceProvider.GetRequiredService<IConversationEventRecorder>();
+            await recorder.RecordAsync(
+                conversationId,
+                [
+                    new AssistantResponseCompleted(
+                        Guid.NewGuid(),
+                        conversationId,
+                        [
+                            MessageContentBlock.Thinking("Let me think"),
+                            MessageContentBlock.Text("Answer")
+                        ],
+                        "test/model")
+                ],
+                TestContext.Current.CancellationToken);
+        }
+
+        // Act
+        var response = await _client.GetAsync(
+            $"/api/conversations/{conversationId}/messages",
+            TestContext.Current.CancellationToken);
+        var json = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        json.Should().Contain("\"type\":\"thinking\"");
+        json.Should().Contain("\"type\":\"text\"");
+        json.Should().NotContain("\"type\":\"Thinking\"");
+        json.Should().NotContain("\"type\":\"Text\"");
     }
 
     // ── §7 GET /api/conversations/{id}/messages — isolation ───────
@@ -383,7 +430,7 @@ public class ConversationEndpointTests
 
         // Assert
         messages.Should().HaveCount(1);
-        messages![0].Content.Should().Be("Message A");
+        MessageContentBlocks.ToVisibleText(messages![0].ContentBlocks).Should().Be("Message A");
         messages[0].ConversationId.Should().Be(conversationA);
     }
 }

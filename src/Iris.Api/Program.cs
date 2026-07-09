@@ -11,6 +11,8 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using System.Text.Json;
+using Iris.Domain.Conversations.Content;
 using System.Text.Json.Serialization;
 
 const string chatHubRoute = "/hubs/chat";
@@ -19,11 +21,18 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
 
+var frontendOptions = builder.Configuration
+    .GetSection(FrontendOptions.SectionName)
+    .Get<FrontendOptions>();
+if (frontendOptions is null || !Uri.TryCreate(frontendOptions.BaseUrl, UriKind.Absolute, out _))
+    throw new InvalidOperationException("Frontend:BaseUrl configuration is missing or not an absolute URL");
+builder.Services.AddSingleton(frontendOptions);
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:5174")
+        policy.WithOrigins(frontendOptions.BaseUrl.TrimEnd('/'))
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -85,14 +94,23 @@ builder.Services
         options.SignInScheme = "ExternalLogin";
     });
 
+// Enum JSON contract (ContentBlockType snake_case + string enums) must be registered in
+// THREE places: MVC JSON, SignalR JSON protocol, and Http.Json options — the last one is
+// what Microsoft.AspNetCore.OpenApi's schema generator reads. Miss it and the OpenAPI spec
+// describes enums as integers, breaking frontend codegen.
+static void AddIrisJsonConverters(IList<JsonConverter> converters)
+{
+    converters.Add(new JsonStringEnumConverter<ContentBlockType>(JsonNamingPolicy.SnakeCaseLower));
+    converters.Add(new JsonStringEnumConverter());
+}
+
 builder.Services.AddControllers()
-    .AddJsonOptions(options =>
-    {
-        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
-    });
+    .AddJsonOptions(options => AddIrisJsonConverters(options.JsonSerializerOptions.Converters));
+builder.Services.ConfigureHttpJsonOptions(options => AddIrisJsonConverters(options.SerializerOptions.Converters));
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
-builder.Services.AddSignalR();
+builder.Services.AddSignalR()
+    .AddJsonProtocol(options => AddIrisJsonConverters(options.PayloadSerializerOptions.Converters));
 builder.Services.AddScoped<IChatStreamNotifier, SignalRChatStreamNotifier>();
 builder.Services.AddOptions<TurnProcessingOptions>()
     .Bind(builder.Configuration.GetSection(TurnProcessingOptions.SectionName))

@@ -1,12 +1,16 @@
 using FluentAssertions;
 using Iris.Api.Authentication;
 using Iris.Application.Conversations;
+using Iris.Domain.Conversations.Content;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Tests.Integration.Helpers;
 using MediatR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.AspNetCore.SignalR.Protocol;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using System.Text;
 
 namespace Iris.Tests.Integration.Hubs;
 
@@ -32,6 +36,11 @@ public class ChatHubStreamingIsolationTests
                     options.HttpMessageHandlerFactory = _ => _factory.Server.CreateHandler();
                     options.AccessTokenProvider = () => Task.FromResult<string?>(userId.ToString());
                 })
+            .AddJsonProtocol(options =>
+            {
+                options.PayloadSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter<ContentBlockType>(System.Text.Json.JsonNamingPolicy.SnakeCaseLower));
+                options.PayloadSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+            })
             .Build();
 
         await connection.StartAsync(TestContext.Current.CancellationToken);
@@ -90,8 +99,8 @@ public class ChatHubStreamingIsolationTests
         // moment SignalR delivers the chunk, instead of hoping a fixed delay is enough.
         var chunkReceivedByA = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var connectionA = await CreateHubConnectionAsync(_userA);
-        var chunksA = new List<string>();
-        connectionA.On<string>("ReceiveChunk", chunk =>
+        var chunksA = new List<ChatStreamChunkDto>();
+        connectionA.On<ChatStreamChunkDto>("ReceiveChunk", chunk =>
         {
             chunksA.Add(chunk);
             chunkReceivedByA.TrySetResult();
@@ -103,8 +112,8 @@ public class ChatHubStreamingIsolationTests
 
         // User B connects but cannot join user A's conversation
         await using var connectionB = await CreateHubConnectionAsync(_userB);
-        var chunksB = new List<string>();
-        connectionB.On<string>("ReceiveChunk", chunk => chunksB.Add(chunk));
+        var chunksB = new List<ChatStreamChunkDto>();
+        connectionB.On<ChatStreamChunkDto>("ReceiveChunk", chunk => chunksB.Add(chunk));
 
         // User B tries to join — should be rejected
         try
@@ -122,13 +131,39 @@ public class ChatHubStreamingIsolationTests
         // Act — send a chunk to user A's conversation group via the notifier
         using var scope = _factory.Services.CreateScope();
         var notifier = scope.ServiceProvider.GetRequiredService<IChatStreamNotifier>();
-        await notifier.SendChunkAsync(conversationId, "secret data", TestContext.Current.CancellationToken);
+        await notifier.SendChunkAsync(
+            conversationId,
+            new ChatStreamChunkDto(conversationId, Guid.NewGuid(), ContentBlockType.Text, 0, "secret data"),
+            TestContext.Current.CancellationToken);
 
         // Wait for the deterministic delivery signal instead of a fixed delay.
         await chunkReceivedByA.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
 
         // Assert
-        chunksA.Should().Contain("secret data", "user A should receive chunks for their conversation");
+        chunksA.Should().ContainSingle(chunk => chunk.Content == "secret data", "user A should receive chunks for their conversation");
         chunksB.Should().BeEmpty("user B should NOT receive chunks for user A's conversation");
+    }
+
+    [Fact]
+    public void SignalRJsonProtocol_SerializesContentBlockTypeAsSnakeCaseString()
+    {
+        var options = _factory.Services
+            .GetRequiredService<IOptions<JsonHubProtocolOptions>>();
+        var protocol = new JsonHubProtocol(options);
+        var bytes = protocol.GetMessageBytes(new InvocationMessage(
+            "ReceiveChunk",
+            [
+                new ChatStreamChunkDto(
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    ContentBlockType.Thinking,
+                    0,
+                    "Let me think")
+            ]));
+
+        var json = Encoding.UTF8.GetString(bytes.ToArray());
+
+        json.Should().Contain("\"blockType\":\"thinking\"");
+        json.Should().NotContain("\"blockType\":1");
     }
 }

@@ -1,4 +1,5 @@
 using Iris.Application.AiIntegration;
+using Iris.Domain.Conversations.Content;
 using Iris.Infrastructure.Persistence;
 using Iris.Tests.Integration.Helpers;
 using Microsoft.AspNetCore.Authentication;
@@ -8,6 +9,8 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Iris.Tests.Integration;
 
@@ -74,7 +77,12 @@ public class ApiTestFactory : WebApplicationFactory<Program>, IAsyncLifetime
 
             services.AddSingleton(MockChatProvider);
 
-            services.AddSignalR(options => options.EnableDetailedErrors = true);
+            services.AddSignalR(options => options.EnableDetailedErrors = true)
+                .AddJsonProtocol(options =>
+                {
+                    options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter<ContentBlockType>(JsonNamingPolicy.SnakeCaseLower));
+                    options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+                });
 
             services.AddAuthentication(TestAuthHandler.SchemeName)
                 .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(

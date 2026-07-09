@@ -8,6 +8,7 @@ using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Entities;
 using Iris.Domain.Conversations.Events;
 using NSubstitute;
+using Iris.Domain.Conversations.Content;
 
 namespace Iris.Tests.Unit.Conversations;
 
@@ -83,7 +84,7 @@ public class StartConversationTurnHandlerTests
                 events.Count() == 1 &&
                 events.First().GetType() == typeof(MessageSent) &&
                 ((MessageSent)events.First()).ConversationId == conversationId &&
-                ((MessageSent)events.First()).Content == command.UserMessage &&
+                MessageContentBlocks.ToVisibleText(((MessageSent)events.First()).ContentBlocks) == command.UserMessage &&
                 ((MessageSent)events.First()).Role == ChatRole.User),
             Arg.Any<CancellationToken>());
 

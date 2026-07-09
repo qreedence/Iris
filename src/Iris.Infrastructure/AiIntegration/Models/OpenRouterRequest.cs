@@ -1,6 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+using System.Text.Json.Serialization;
 
 namespace Iris.Infrastructure.AiIntegration.Models
 {
@@ -16,6 +14,8 @@ namespace Iris.Infrastructure.AiIntegration.Models
 
     internal record OpenRouterMessage(
         string Role,
-        string Content
-)   ;
+        string Content,
+        [property: JsonPropertyName("reasoning_details")] IReadOnlyList<IReadOnlyDictionary<string, object?>>? ReasoningDetails = null,
+        string? Reasoning = null
+    );
 }

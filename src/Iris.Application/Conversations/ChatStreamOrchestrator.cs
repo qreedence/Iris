@@ -2,6 +2,7 @@ using System.Text;
 using Iris.Application.AiIntegration;
 using Iris.Application.AiIntegration.Exceptions;
 using Iris.Application.AiIntegration.Models;
+using Iris.Domain.Conversations.Content;
 using Iris.Domain.Conversations.Events;
 using Microsoft.Extensions.Logging;
 
@@ -70,17 +71,29 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
             await _eventRecorder.RecordAsync(conversationId, preparedTurn.PreStreamEvents, ct);
         }
 
-        var content = new StringBuilder();
+        var content = new StreamedContentAccumulator();
         UsageInfo? usageInfo = null;
 
         try
         {
             await foreach (var chunk in _chatProvider.StreamAsync(preparedTurn.ChatRequest, ct).WithCancellation(ct))
             {
-                if (!string.IsNullOrEmpty(chunk.Content))
+                if (!string.IsNullOrEmpty(chunk.Content) || chunk.ProviderMetadata is not null)
                 {
-                    content.Append(chunk.Content);
-                    await _notifier.SendChunkAsync(conversationId, chunk.Content, ct);
+                    content.Append(chunk);
+
+                    if (!string.IsNullOrEmpty(chunk.Content))
+                    {
+                        await _notifier.SendChunkAsync(
+                            conversationId,
+                            new ChatStreamChunkDto(
+                                conversationId,
+                                messageId,
+                                chunk.BlockType,
+                                chunk.BlockIndex,
+                                chunk.Content),
+                            ct);
+                    }
                 }
 
                 if (chunk.UsageInfo is not null)
@@ -104,7 +117,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
                 throw;
             }
 
-            var turnCancelled = new TurnCancelled(conversationId, GetPartialContent(content), messageId);
+            var turnCancelled = new TurnCancelled(conversationId, content.GetPartialVisibleText(), messageId);
 
             await _eventRecorder.RecordAsync(
                 conversationId,
@@ -119,7 +132,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
         {
             var (source, errorCode, message) = MapFailure(ex);
 
-            await FailTurnAsync(conversationId, source, errorCode, message, GetPartialContent(content));
+            await FailTurnAsync(conversationId, source, errorCode, message, content.GetPartialVisibleText());
 
             _logger.LogWarning(ex,
                 "Conversation stream failed for {ConversationId} with {ErrorCode}",
@@ -135,7 +148,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
                 FailureSource.Internal,
                 "internal_error",
                 "An unexpected error occurred.",
-                GetPartialContent(content));
+                content.GetPartialVisibleText());
 
             _logger.LogError(ex, "Unexpected error during streaming for {ConversationId}", conversationId);
 
@@ -145,7 +158,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
         var assistantResponseCompleted = new AssistantResponseCompleted(
             Guid.NewGuid(),
             conversationId,
-            content.ToString(),
+            content.ToContentBlocks(),
             preparedTurn.ChatRequest.Model);
 
         var turnCompleted = new TurnCompleted(
@@ -189,8 +202,82 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
         };
     }
 
-    private static string? GetPartialContent(StringBuilder content)
+    private sealed class StreamedContentAccumulator
     {
-        return content.Length == 0 ? null : content.ToString();
+        private readonly SortedDictionary<int, MutableBlock> _blocks = [];
+
+        public void Append(StreamedChunk chunk)
+        {
+            if (!_blocks.TryGetValue(chunk.BlockIndex, out var block))
+            {
+                block = new MutableBlock(chunk.BlockType);
+                _blocks[chunk.BlockIndex] = block;
+            }
+
+            block.Append(chunk.Content, chunk.ProviderMetadata);
+        }
+
+        public IReadOnlyList<MessageContentBlock> ToContentBlocks()
+        {
+            return _blocks.Values
+                .Select(block => block.ToContentBlock())
+                .ToList();
+        }
+
+        public string? GetPartialVisibleText()
+        {
+            var visibleText = string.Concat(_blocks.Values
+                .Where(block => block.Type == ContentBlockType.Text)
+                .Select(block => block.Content.ToString()));
+
+            return string.IsNullOrEmpty(visibleText) ? null : visibleText;
+        }
+    }
+
+    private sealed class MutableBlock
+    {
+        private readonly List<IReadOnlyDictionary<string, object?>> _providerMetadata = [];
+
+        public MutableBlock(ContentBlockType type)
+        {
+            Type = type;
+        }
+
+        public ContentBlockType Type { get; }
+        public StringBuilder Content { get; } = new();
+
+        public void Append(string? content, IReadOnlyList<IReadOnlyDictionary<string, object?>>? providerMetadata)
+        {
+            if (!string.IsNullOrEmpty(content))
+                Content.Append(content);
+
+            if (providerMetadata is { } metadata)
+                _providerMetadata.AddRange(metadata);
+        }
+
+        public MessageContentBlock ToContentBlock()
+        {
+            var content = Content.ToString();
+            var metadata = BuildProviderMetadata();
+
+            return Type switch
+            {
+                ContentBlockType.Text => MessageContentBlock.Text(content),
+                ContentBlockType.Thinking => MessageContentBlock.Thinking(content, metadata),
+                _ => new MessageContentBlock
+                {
+                    Type = Type,
+                    Content = content,
+                    ProviderMetadata = metadata,
+                }
+            };
+        }
+
+        private IReadOnlyList<IReadOnlyDictionary<string, object?>>? BuildProviderMetadata()
+        {
+            return _providerMetadata.Count == 0
+                ? null
+                : _providerMetadata;
+        }
     }
 }

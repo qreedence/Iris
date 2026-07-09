@@ -1,5 +1,6 @@
-﻿using Iris.Application.Conversations;
+using Iris.Application.Conversations;
 using Iris.Domain.Conversations;
+using Iris.Domain.Conversations.Content;
 using Iris.Domain.Conversations.Events;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
@@ -83,8 +84,13 @@ public class EfEventStore : IEventStore
         return events;
     }
 
-    private static readonly JsonSerializerOptions SerializerOptions = new()
+    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
-        Converters = { new JsonStringEnumConverter() },
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters =
+        {
+            new JsonStringEnumConverter<ContentBlockType>(JsonNamingPolicy.SnakeCaseLower),
+            new JsonStringEnumConverter()
+        },
     };
 }

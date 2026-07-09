@@ -22,7 +22,7 @@ namespace Iris.Infrastructure.Projectors
                 notification.Event.Id,
                 notification.Event.ConversationId,
                 ChatRole.Assistant,
-                notification.Event.Content,
+                notification.Event.ContentBlocks,
                 notification.OccurredAt,
                 ct);
         }

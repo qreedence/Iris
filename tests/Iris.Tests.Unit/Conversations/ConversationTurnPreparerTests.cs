@@ -7,6 +7,7 @@ using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Events;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using Iris.Domain.Conversations.Content;
 
 namespace Iris.Tests.Unit.Conversations;
 
@@ -42,9 +43,9 @@ public class ConversationTurnPreparerTests
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns([
                 new ConversationCreated(conversationId, _userId, personaId, "Chat"),
-                new MessageSent(Guid.NewGuid(), conversationId, "First user message", ChatRole.User),
-                new AssistantResponseCompleted(Guid.NewGuid(), conversationId, "First assistant response", "test/model"),
-                new MessageSent(Guid.NewGuid(), conversationId, "Second user message", ChatRole.User)
+                new MessageSent(Guid.NewGuid(), conversationId, MessageContentBlocks.Text("First user message"), ChatRole.User),
+                new AssistantResponseCompleted(Guid.NewGuid(), conversationId, MessageContentBlocks.Text("First assistant response"), "test/model"),
+                new MessageSent(Guid.NewGuid(), conversationId, MessageContentBlocks.Text("Second user message"), ChatRole.User)
             ]);
         SetupPersona(personaId, identity: "You are Iris.");
         _systemPromptAssembler
@@ -65,11 +66,11 @@ public class ConversationTurnPreparerTests
         prepared.ChatRequest.Model.Should().Be("fallback/model");
         prepared.ChatRequest.SystemPrompt.Should().Be("<identity>You are Iris.</identity>");
         prepared.ChatRequest.ModelParameters.Should().Be(modelParameters);
-        prepared.ChatRequest.Messages.Should().Equal([
-            new ChatMessage(ChatRole.User, "First user message"),
-            new ChatMessage(ChatRole.Assistant, "First assistant response"),
-            new ChatMessage(ChatRole.User, "Second user message")
-        ]);
+        AssertRolesAndVisibleText(
+            prepared.ChatRequest.Messages,
+            (ChatRole.User, "First user message"),
+            (ChatRole.Assistant, "First assistant response"),
+            (ChatRole.User, "Second user message"));
         prepared.PreStreamEvents.Should().BeEmpty();
     }
 
@@ -218,7 +219,7 @@ public class ConversationTurnPreparerTests
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns([
                 new ConversationCreated(conversationId, _userId, personaId, "Chat"),
-                new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User),
+                new MessageSent(Guid.NewGuid(), conversationId, MessageContentBlocks.Text("Hello"), ChatRole.User),
                 new ModelChanged(conversationId, "changed/model")
             ]);
         SetupPersona(personaId, modelPreference: "persona/model");
@@ -248,7 +249,7 @@ public class ConversationTurnPreparerTests
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns([
                 new ConversationCreated(conversationId, _userId, personaId, "Chat"),
-                new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User),
+                new MessageSent(Guid.NewGuid(), conversationId, MessageContentBlocks.Text("Hello"), ChatRole.User),
                 new ModelChanged(conversationId, "old/model")
             ]);
         SetupPersona(personaId, modelPreference: "persona/model");
@@ -325,7 +326,7 @@ public class ConversationTurnPreparerTests
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns([
                 new ConversationCreated(conversationId, _userId, personaId, "Chat"),
-                new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User)
+                new MessageSent(Guid.NewGuid(), conversationId, MessageContentBlocks.Text("Hello"), ChatRole.User)
             ]);
     }
 
@@ -341,7 +342,7 @@ public class ConversationTurnPreparerTests
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns([
                 new ConversationCreated(conversationId, _userId, personaId, "Chat"),
-                new MessageSent(Guid.NewGuid(), conversationId, "Hello", ChatRole.User)
+                new MessageSent(Guid.NewGuid(), conversationId, MessageContentBlocks.Text("Hello"), ChatRole.User)
             ]);
 
         // Act — attacker tries to prepare another user's conversation
@@ -373,9 +374,9 @@ public class ConversationTurnPreparerTests
         _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
             .Returns([
                 new ConversationCreated(conversationId, _userId, personaId, "Chat"),
-                new MessageSent(messageAId, conversationId, "Message A", ChatRole.User),
+                new MessageSent(messageAId, conversationId, MessageContentBlocks.Text("Message A"), ChatRole.User),
                 new ModelChanged(conversationId, "later/model"),
-                new MessageSent(Guid.NewGuid(), conversationId, "Message B", ChatRole.User),
+                new MessageSent(Guid.NewGuid(), conversationId, MessageContentBlocks.Text("Message B"), ChatRole.User),
             ]);
         SetupPersona(personaId, modelPreference: "persona/model");
 
@@ -389,12 +390,26 @@ public class ConversationTurnPreparerTests
             TestContext.Current.CancellationToken);
 
         // History ends at Message A — Message B (queued after) is not included.
-        prepared.ChatRequest.Messages.Should().Equal([
-            new ChatMessage(ChatRole.User, "Message A"),
-        ]);
+        AssertRolesAndVisibleText(
+            prepared.ChatRequest.Messages,
+            (ChatRole.User, "Message A"));
 
         // The ModelChanged after Message A is ignored; model falls to persona pref.
         prepared.ChatRequest.Model.Should().Be("persona/model");
+    }
+
+
+    private static void AssertRolesAndVisibleText(
+        IReadOnlyList<ChatMessage> messages,
+        params (ChatRole Role, string VisibleText)[] expected)
+    {
+        messages.Should().HaveCount(expected.Length);
+
+        for (var i = 0; i < expected.Length; i++)
+        {
+            messages[i].Role.Should().Be(expected[i].Role);
+            messages[i].VisibleText.Should().Be(expected[i].VisibleText);
+        }
     }
 
     private void SetupPersona(

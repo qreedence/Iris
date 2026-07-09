@@ -4,6 +4,7 @@ using Iris.Domain.AiIntegration;
 using Iris.Tests.Integration.Helpers;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using Iris.Domain.Conversations.Content;
 
 namespace Iris.Tests.Integration.Conversations;
 
@@ -92,7 +93,7 @@ public class ProjectorTests
 
         message.Should().NotBeNull();
         message!.ConversationId.Should().Be(conversationId);
-        message.Content.Should().Be("Hello, Iris!");
+        MessageContentBlocks.ToVisibleText(message.ContentBlocks).Should().Be("Hello, Iris!");
         message.Role.Should().Be(ChatRole.User);
         message.CreatedAt.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5));
     }
@@ -204,8 +205,8 @@ public class ProjectorTests
             .ToListAsync(TestContext.Current.CancellationToken);
 
         messages.Should().HaveCount(3);
-        messages[0].Content.Should().Be("First");
-        messages[1].Content.Should().Be("Second");
-        messages[2].Content.Should().Be("Third");
+        MessageContentBlocks.ToVisibleText(messages[0].ContentBlocks).Should().Be("First");
+        MessageContentBlocks.ToVisibleText(messages[1].ContentBlocks).Should().Be("Second");
+        MessageContentBlocks.ToVisibleText(messages[2].ContentBlocks).Should().Be("Third");
     }
 }

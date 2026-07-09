@@ -18,11 +18,16 @@ namespace Iris.Api.Controllers
     {
         private readonly IAuthService _authService;
         private readonly AuthCookieService _cookieService;
+        private readonly FrontendOptions _frontendOptions;
 
-        public AuthController(IAuthService authService, AuthCookieService cookieService)
+        public AuthController(
+            IAuthService authService,
+            AuthCookieService cookieService,
+            FrontendOptions frontendOptions)
         {
             _authService = authService;
             _cookieService = cookieService;
+            _frontendOptions = frontendOptions;
         }
 
         [HttpGet("social")]
@@ -56,7 +61,10 @@ namespace Iris.Api.Controllers
 
             var authTokens = await _authService.HandleSocialLoginAsync(provider, result.Principal!, ct);
             _cookieService.SetAuthCookies(Response, authTokens);
-            return Ok();
+
+            // Send the browser back to the SPA. The redirect target is static config
+            // (never user input), so this cannot be turned into an open redirect.
+            return Redirect($"{_frontendOptions.BaseUrl.TrimEnd('/')}/chat");
         }
 
         [HttpPost("refresh")]

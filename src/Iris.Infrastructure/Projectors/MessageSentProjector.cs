@@ -21,7 +21,7 @@ namespace Iris.Infrastructure.Projectors
                 notification.Event.Id,
                 notification.Event.ConversationId,
                 notification.Event.Role,
-                notification.Event.Content,
+                notification.Event.ContentBlocks,
                 notification.OccurredAt,
                 ct);
         }

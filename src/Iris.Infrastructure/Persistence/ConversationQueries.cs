@@ -52,7 +52,7 @@ namespace Iris.Infrastructure.Persistence
                     m.Id,
                     m.ConversationId,
                     m.Role,
-                    m.Content,
+                    m.ContentBlocks,
                     m.CreatedAt))
                 .ToListAsync(ct);
 

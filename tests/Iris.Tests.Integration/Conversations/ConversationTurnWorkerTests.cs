@@ -16,6 +16,7 @@ using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
+using Iris.Domain.Conversations.Content;
 
 namespace Iris.Tests.Integration.Conversations;
 
@@ -111,7 +112,7 @@ public class ConversationTurnWorkerTests
             .Returns(call =>
             {
                 var request = call.Arg<ChatRequest>();
-                var last = request.Messages[^1].Content;
+                var last = request.Messages[^1].VisibleText;
                 var ct = call.ArgAt<CancellationToken>(1);
                 if (last == markerA || last == markerB)
                     return GatedStream(started[last], release.Task, ct);
@@ -196,7 +197,7 @@ public class ConversationTurnWorkerTests
             {
                 var request = call.Arg<ChatRequest>();
                 var ct = call.ArgAt<CancellationToken>(1);
-                if (request.Messages.Any(m => m.Content == marker1))
+                if (request.Messages.Any(m => m.VisibleText == marker1))
                     Interlocked.Increment(ref providerCalls);
                 return DefaultStream(ct);
             });
@@ -215,10 +216,10 @@ public class ConversationTurnWorkerTests
             await recorder.RecordAsync(
                 conversationId,
                 [
-                    new MessageSent(message1Id, conversationId, marker1, Iris.Domain.AiIntegration.ChatRole.User),
-                    new AssistantResponseCompleted(Guid.NewGuid(), conversationId, "turn 1 response", "test/model"),
+                    new MessageSent(message1Id, conversationId, MessageContentBlocks.Text(marker1), Iris.Domain.AiIntegration.ChatRole.User),
+                    new AssistantResponseCompleted(Guid.NewGuid(), conversationId, MessageContentBlocks.Text("turn 1 response"), "test/model"),
                     new TurnCompleted(conversationId, 1, 1),
-                    new MessageSent(message2Id, conversationId, marker2, Iris.Domain.AiIntegration.ChatRole.User),
+                    new MessageSent(message2Id, conversationId, MessageContentBlocks.Text(marker2), Iris.Domain.AiIntegration.ChatRole.User),
                 ],
                 TestContext.Current.CancellationToken);
         }
@@ -301,7 +302,7 @@ public class ConversationTurnWorkerTests
             var recorder = scope.ServiceProvider.GetRequiredService<IConversationEventRecorder>();
             await recorder.RecordAsync(
                 conversationId,
-                [new MessageSent(messageId, conversationId, marker, Iris.Domain.AiIntegration.ChatRole.User)],
+                [new MessageSent(messageId, conversationId, MessageContentBlocks.Text(marker), Iris.Domain.AiIntegration.ChatRole.User)],
                 TestContext.Current.CancellationToken);
         }
 
@@ -486,7 +487,7 @@ public class ConversationTurnWorkerTests
             {
                 var request = call.Arg<ChatRequest>();
                 var ct = call.ArgAt<CancellationToken>(1);
-                if (request.Messages[^1].Content == marker)
+                if (request.Messages[^1].VisibleText == marker)
                     return GatedStream(streamStarted, release.Task, ct);
                 return DefaultStream(ct);
             });

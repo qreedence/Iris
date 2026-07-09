@@ -14,6 +14,7 @@ using Iris.Tests.Integration.Helpers;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
+using Iris.Domain.Conversations.Content;
 
 namespace Iris.Tests.Integration.Conversations;
 
@@ -138,7 +139,7 @@ public class ChatEndpointTests
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
         messages.Should().NotBeNull();
-        messages!.Should().ContainSingle(message => message.Content == "Hello!");
+        messages!.Should().ContainSingle(message => MessageContentBlocks.ToVisibleText(message.ContentBlocks) == "Hello!");
     }
 
     [Fact]
@@ -163,7 +164,7 @@ public class ChatEndpointTests
             CreateChatRequest(marker1),
             TestContext.Current.CancellationToken);
 
-        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == marker1);
+        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.VisibleText == marker1);
 
         // Act - Turn 2
         await _client.PostAsJsonAsync(
@@ -172,10 +173,10 @@ public class ChatEndpointTests
             TestContext.Current.CancellationToken);
 
         // Assert - latest stream should include both user messages in chronological order.
-        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == marker2);
+        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.VisibleText == marker2);
         capturedRequest.Should().NotBeNull();
-        capturedRequest!.Messages[0].Content.Should().Be(marker1);
-        capturedRequest.Messages[^1].Content.Should().Be(marker2);
+        capturedRequest!.Messages[0].VisibleText.Should().Be(marker1);
+        capturedRequest.Messages[^1].VisibleText.Should().Be(marker2);
     }
 
     [Fact]
@@ -200,7 +201,7 @@ public class ChatEndpointTests
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
-        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == userMessage);
+        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.VisibleText == userMessage);
         capturedRequest!.SystemPrompt.Should().Be(
             "<app_context>" + Environment.NewLine +
             "Test app context" + Environment.NewLine +
@@ -236,7 +237,7 @@ public class ChatEndpointTests
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
-        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == userMessage);
+        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.VisibleText == userMessage);
         capturedRequest!.Model.Should().Be("persona/model");
     }
 
@@ -260,7 +261,7 @@ public class ChatEndpointTests
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
-        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == userMessage);
+        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.VisibleText == userMessage);
         capturedRequest!.Model.Should().Be("persona/model");
     }
 
@@ -284,7 +285,7 @@ public class ChatEndpointTests
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
-        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == userMessage);
+        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.VisibleText == userMessage);
         capturedRequest!.Model.Should().Be("new/model");
     }
 
@@ -308,7 +309,7 @@ public class ChatEndpointTests
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
-        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.Content == userMessage);
+        await WaitUntilAsync(() => capturedRequest?.Messages.LastOrDefault()?.VisibleText == userMessage);
         capturedRequest!.Model.Should().Be("fallback/model");
     }
 
@@ -327,7 +328,7 @@ public class ChatEndpointTests
             {
                 var request = call.Arg<ChatRequest>();
                 var ct = call.ArgAt<CancellationToken>(1);
-                if (markers.Contains(request.Messages.LastOrDefault()?.Content))
+                if (markers.Contains(request.Messages.LastOrDefault()?.VisibleText))
                     return CaptureAndStreamResponse(request, capture, ct);
                 return ChatProviderMock.DefaultStream(ct);
             });
