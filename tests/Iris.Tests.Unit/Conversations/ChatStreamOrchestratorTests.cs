@@ -766,6 +766,108 @@ public class ChatStreamOrchestratorTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task StreamAsync_MultiRoundTurn_ChunksCarryPerRoundMessageIdMatchingRecordedRound()
+    {
+        // QRE-402 contract: every streamed chunk's MessageId is the id of the
+        // conversation_messages row it belongs to. Each model round streams under
+        // its own id, which is also that round's AssistantResponseCompleted.Id.
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        var turnMessageId = Guid.NewGuid();
+        SetupPreparedTurn(conversationId);
+
+        var chunks = new List<ChatStreamChunkDto>();
+        _notifier.SendChunkAsync(
+            Arg.Any<Guid>(),
+            Arg.Do<ChatStreamChunkDto>(chunks.Add),
+            Arg.Any<CancellationToken>());
+
+        var recordedRounds = new List<AssistantResponseCompleted>();
+        _eventRecorder.RecordAsync(
+            conversationId,
+            Arg.Do<IEnumerable<ConversationEvent>>(events =>
+                recordedRounds.AddRange(events.OfType<AssistantResponseCompleted>())),
+            Arg.Any<CancellationToken>());
+
+        var providerRound = 0;
+        _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => ++providerRound == 1
+                ? StreamChunks([
+                    new StreamedChunk("Checking the time.", false, null),
+                    new StreamedChunk(
+                        null,
+                        true,
+                        new UsageInfo(1, 1, 2),
+                        ToolCalls: [new ToolCall("call-1", "get_current_time", "{}")],
+                        FinishReason: FinishReason.ToolCalls)
+                ], call.ArgAt<CancellationToken>(1))
+                : StreamChunks([
+                    new StreamedChunk("It is nine.", false, null),
+                    new StreamedChunk(null, true, new UsageInfo(1, 1, 2), FinishReason: FinishReason.Stop)
+                ], call.ArgAt<CancellationToken>(1)));
+        _toolRegistry.ExecuteAsync(Arg.Any<ToolCall>(), Arg.Any<ToolContext>(), Arg.Any<CancellationToken>())
+            .Returns(new ToolResult("{}", null, ToolExecutionStatus.Succeeded));
+
+        await sut.StreamAsync(
+            Guid.NewGuid(), conversationId, turnMessageId, "test/model", false, null,
+            TestContext.Current.CancellationToken);
+
+        recordedRounds.Should().HaveCount(2);
+
+        var roundOneText = chunks.Single(c => c.Content == "Checking the time.");
+        var toolUseChunk = chunks.Single(c => c.BlockType == ContentBlockType.ToolUse);
+        var roundTwoText = chunks.Single(c => c.Content == "It is nine.");
+
+        roundOneText.MessageId.Should().Be(recordedRounds[0].Id);
+        toolUseChunk.MessageId.Should().Be(recordedRounds[0].Id);
+        roundTwoText.MessageId.Should().Be(recordedRounds[1].Id);
+        roundTwoText.MessageId.Should().NotBe(roundOneText.MessageId);
+        chunks.Should().OnlyContain(c => c.MessageId != turnMessageId);
+    }
+
+    [Fact]
+    public async Task StreamAsync_ToolResultChunk_CarriesPayloadIdAsMessageId()
+    {
+        // QRE-402 contract: the tool_result chunk's MessageId is the Tool-role
+        // message row's id, which the ToolExecutedProjector sets to the PayloadId.
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        SetupPreparedTurn(conversationId);
+
+        var chunks = new List<ChatStreamChunkDto>();
+        _notifier.SendChunkAsync(
+            Arg.Any<Guid>(),
+            Arg.Do<ChatStreamChunkDto>(chunks.Add),
+            Arg.Any<CancellationToken>());
+
+        var providerRound = 0;
+        _chatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => ++providerRound == 1
+                ? StreamChunks([
+                    new StreamedChunk(
+                        null,
+                        true,
+                        new UsageInfo(1, 1, 2),
+                        ToolCalls: [new ToolCall("call-1", "get_current_time", "{}")],
+                        FinishReason: FinishReason.ToolCalls)
+                ], call.ArgAt<CancellationToken>(1))
+                : StreamChunks([
+                    new StreamedChunk("Done", false, null),
+                    new StreamedChunk(null, true, new UsageInfo(1, 1, 2), FinishReason: FinishReason.Stop)
+                ], call.ArgAt<CancellationToken>(1)));
+        _toolRegistry.ExecuteAsync(Arg.Any<ToolCall>(), Arg.Any<ToolContext>(), Arg.Any<CancellationToken>())
+            .Returns(new ToolResult("{\"utc\":\"09:00Z\"}", "09:00 UTC", ToolExecutionStatus.Succeeded));
+
+        await sut.StreamAsync(
+            Guid.NewGuid(), conversationId, Guid.NewGuid(), "test/model", false, null,
+            TestContext.Current.CancellationToken);
+
+        var toolResultChunk = chunks.Single(c => c.BlockType == ContentBlockType.ToolResult);
+        toolResultChunk.PayloadId.Should().NotBeNull().And.NotBe(Guid.Empty);
+        toolResultChunk.MessageId.Should().Be(toolResultChunk.PayloadId!.Value);
+    }
+
     private void SetupPreparedTurn(
         Guid conversationId,
         ChatRequest? chatRequest = null,
