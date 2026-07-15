@@ -5,6 +5,7 @@
         string Model,
         IReadOnlyList<ChatMessage> Messages,
         string? SystemPrompt = null,
-        ModelParameters? ModelParameters = null
+        ModelParameters? ModelParameters = null,
+        ToolOptions? ToolOptions = null
     );
 }

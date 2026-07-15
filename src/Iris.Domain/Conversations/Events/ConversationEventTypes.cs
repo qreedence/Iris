@@ -13,6 +13,7 @@ public static class ConversationEventTypes
         [nameof(ConversationCreated)] = typeof(ConversationCreated),
         [nameof(MessageSent)] = typeof(MessageSent),
         [nameof(AssistantResponseCompleted)] = typeof(AssistantResponseCompleted),
+        [nameof(ToolExecuted)] = typeof(ToolExecuted),
         [nameof(TurnCompleted)] = typeof(TurnCompleted),
         [nameof(TurnFailed)] = typeof(TurnFailed),
         [nameof(TurnCancelled)] = typeof(TurnCancelled),

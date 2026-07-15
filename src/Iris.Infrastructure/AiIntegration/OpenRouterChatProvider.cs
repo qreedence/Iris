@@ -1,6 +1,7 @@
 using Iris.Application.AiIntegration;
 using Iris.Application.AiIntegration.Exceptions;
 using Iris.Application.AiIntegration.Models;
+using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Content;
 using Iris.Infrastructure.AiIntegration.Models;
 using System.Net.Http.Json;
@@ -34,6 +35,8 @@ public class OpenRouterChatProvider : IChatProvider
         using var reader = new StreamReader(stream);
 
         var blockIndexes = new Dictionary<ContentBlockType, int>();
+        var toolCalls = new ToolCallAccumulator();
+        var completed = false;
 
         string? line;
         while ((line = await ReadLineAsync(reader, ct)) != null)
@@ -41,20 +44,30 @@ public class OpenRouterChatProvider : IChatProvider
             if (string.IsNullOrEmpty(line) || !line.StartsWith("data: "))
                 continue;
 
-            var chunks = ParseStreamEvent(line["data: ".Length..]);
+            var chunks = ParseStreamEvent(line["data: ".Length..], toolCalls);
             foreach (var chunk in chunks)
+            {
+                completed |= chunk.IsComplete;
                 yield return AssignBlockIndex(chunk, blockIndexes);
+            }
         }
+
+        if (!completed)
+            throw new ChatProviderException("OpenRouter stream ended without response.completed.");
     }
 
     private async Task<HttpResponseMessage> SendStreamRequestAsync(ChatRequest request, CancellationToken ct)
     {
         try
         {
-            var content = JsonContent.Create(MapToOpenRouterRequest(request, true), options: _jsonOptions);
+            var content = JsonContent.Create(MapToOpenRouterRequest(request), options: _jsonOptions);
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Post, "/api/v1/responses")
+            {
+                Content = content,
+            };
 
             var response = await _httpClient.SendAsync(
-                new HttpRequestMessage(HttpMethod.Post, "/api/v1/responses") { Content = content },
+                requestMessage,
                 HttpCompletionOption.ResponseHeadersRead,
                 ct);
 
@@ -111,7 +124,9 @@ public class OpenRouterChatProvider : IChatProvider
         return chunk with { BlockIndex = blockIndex };
     }
 
-    private static IReadOnlyList<StreamedChunk> ParseStreamEvent(string json)
+    private static IReadOnlyList<StreamedChunk> ParseStreamEvent(
+        string json,
+        ToolCallAccumulator toolCalls)
     {
         try
         {
@@ -122,6 +137,9 @@ public class OpenRouterChatProvider : IChatProvider
             var type = doc.RootElement.TryGetProperty("type", out var typeProperty)
                 ? typeProperty.GetString()
                 : null;
+
+            if (type is "response.failed" or "response.error" or "response.incomplete" or "error")
+                throw CreateStreamFailure(doc.RootElement, type);
 
             if (type == "response.output_text.delta")
             {
@@ -137,6 +155,8 @@ public class OpenRouterChatProvider : IChatProvider
 
             if (type == "response.completed")
             {
+                CaptureCompletedToolCalls(doc.RootElement, toolCalls);
+
                 UsageInfo? usage = null;
                 if (doc.RootElement.TryGetProperty("response", out var resp) &&
                     resp.TryGetProperty("usage", out var u))
@@ -146,7 +166,35 @@ public class OpenRouterChatProvider : IChatProvider
                         u.GetProperty("output_tokens").GetInt32(),
                         u.GetProperty("total_tokens").GetInt32());
                 }
-                return [new StreamedChunk(null, true, usage)];
+                var completedToolCalls = toolCalls.Build();
+                var finishReason = completedToolCalls.Count > 0
+                    ? FinishReason.ToolCalls
+                    : FinishReason.Stop;
+
+                return [new StreamedChunk(
+                    null,
+                    true,
+                    usage,
+                    ToolCalls: completedToolCalls.Count == 0 ? null : completedToolCalls,
+                    FinishReason: finishReason)];
+            }
+
+            if (type == "response.output_item.added")
+            {
+                CaptureToolCallStart(doc.RootElement, toolCalls);
+                return [];
+            }
+
+            if (type == "response.function_call_arguments.delta")
+            {
+                CaptureToolCallDelta(doc.RootElement, toolCalls);
+                return [];
+            }
+
+            if (type == "response.function_call_arguments.done")
+            {
+                CaptureToolCallDone(doc.RootElement, toolCalls);
+                return [];
             }
 
             if (TryParseReasoningDetails(doc.RootElement, out var reasoningChunks))
@@ -168,6 +216,103 @@ public class OpenRouterChatProvider : IChatProvider
         catch (InvalidOperationException ex)
         {
             throw new ChatDeserializationException("Failed to deserialize OpenRouter stream event", ex);
+        }
+    }
+
+    private static ChatProviderException CreateStreamFailure(JsonElement root, string eventType)
+    {
+        var errorContainer = root;
+        if (root.TryGetProperty("response", out var response))
+            errorContainer = response;
+
+        var message = errorContainer.TryGetProperty("error", out var error)
+            && error.TryGetProperty("message", out var messageProperty)
+            ? messageProperty.GetString()
+            : null;
+        var errorType = errorContainer.TryGetProperty("error_type", out var errorTypeProperty)
+            ? errorTypeProperty.GetString()
+            : null;
+
+        return new ChatProviderException(
+            $"OpenRouter {eventType}{(string.IsNullOrWhiteSpace(errorType) ? string.Empty : $" ({errorType})")}: "
+            + (string.IsNullOrWhiteSpace(message) ? "The response did not complete." : message));
+    }
+
+    private static void CaptureToolCallStart(JsonElement root, ToolCallAccumulator toolCalls)
+    {
+        if (!root.TryGetProperty("item", out var item)
+            || !item.TryGetProperty("type", out var itemType)
+            || itemType.GetString() != "function_call")
+        {
+            return;
+        }
+
+        var outputIndex = root.GetProperty("output_index").GetInt32();
+        var providerItemId = item.GetProperty("id").GetString()
+            ?? throw new InvalidOperationException("Function-call item is missing id.");
+        var callId = item.GetProperty("call_id").GetString()
+            ?? throw new InvalidOperationException("Function-call item is missing call_id.");
+        var name = item.GetProperty("name").GetString()
+            ?? throw new InvalidOperationException("Function-call item is missing name.");
+        var arguments = item.TryGetProperty("arguments", out var argumentsProperty)
+            ? argumentsProperty.GetString() ?? string.Empty
+            : string.Empty;
+
+        toolCalls.Start(outputIndex, providerItemId, callId, name, arguments);
+    }
+
+    private static void CaptureToolCallDelta(JsonElement root, ToolCallAccumulator toolCalls)
+    {
+        var outputIndex = root.GetProperty("output_index").GetInt32();
+        var delta = root.GetProperty("delta").GetString()
+            ?? throw new InvalidOperationException("Function-call argument delta is null.");
+        var providerItemId = root.TryGetProperty("item_id", out var itemId)
+            ? itemId.GetString()
+            : null;
+
+        toolCalls.Append(outputIndex, providerItemId, delta);
+    }
+
+    private static void CaptureToolCallDone(JsonElement root, ToolCallAccumulator toolCalls)
+    {
+        var outputIndex = root.GetProperty("output_index").GetInt32();
+        var arguments = root.GetProperty("arguments").GetString()
+            ?? throw new InvalidOperationException("Completed function-call arguments are null.");
+        var providerItemId = root.TryGetProperty("item_id", out var itemId)
+            ? itemId.GetString()
+            : null;
+
+        toolCalls.Complete(outputIndex, providerItemId, arguments);
+    }
+
+    private static void CaptureCompletedToolCalls(JsonElement root, ToolCallAccumulator toolCalls)
+    {
+        if (!root.TryGetProperty("response", out var response)
+            || !response.TryGetProperty("output", out var output)
+            || output.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        var outputIndex = 0;
+        foreach (var item in output.EnumerateArray())
+        {
+            if (item.TryGetProperty("type", out var itemType)
+                && itemType.GetString() == "function_call")
+            {
+                toolCalls.AddOrReplace(
+                    outputIndex,
+                    item.GetProperty("id").GetString()
+                        ?? throw new InvalidOperationException("Function-call item is missing id."),
+                    item.GetProperty("call_id").GetString()
+                        ?? throw new InvalidOperationException("Function-call item is missing call_id."),
+                    item.GetProperty("name").GetString()
+                        ?? throw new InvalidOperationException("Function-call item is missing name."),
+                    item.GetProperty("arguments").GetString()
+                        ?? throw new InvalidOperationException("Function-call item is missing arguments."));
+            }
+
+            outputIndex++;
         }
     }
 
@@ -242,32 +387,100 @@ public class OpenRouterChatProvider : IChatProvider
             : null;
     }
 
-    private OpenRouterRequest MapToOpenRouterRequest(ChatRequest request, bool stream = false)
+    private OpenRouterRequest MapToOpenRouterRequest(ChatRequest request)
     {
         return new OpenRouterRequest(
             Model: request.Model,
             Input: request.Messages
-                .Select(MapToOpenRouterMessage)
+                .SelectMany(MapToOpenRouterInput)
                 .ToList(),
             Instructions: request.SystemPrompt,
             Temperature: request.ModelParameters?.Temperature,
             MaxOutputTokens: request.ModelParameters?.MaxOutputTokens,
             TopP: request.ModelParameters?.TopP,
-            Stream: stream ? true : null
+            Stream: true,
+            Tools: request.ToolOptions?.Tools
+                .Select(tool => new OpenRouterTool(
+                    "function",
+                    tool.Name,
+                    tool.Description,
+                    tool.ParametersSchema))
+                .ToList(),
+            ToolChoice: MapToolChoice(request.ToolOptions?.ToolChoice)
         );
     }
 
-    private static OpenRouterMessage MapToOpenRouterMessage(ChatMessage message)
+    private static IEnumerable<object> MapToOpenRouterInput(ChatMessage message)
     {
         var content = message.VisibleText;
         var reasoningDetails = BuildReasoningDetails(message.ContentBlocks);
         var reasoning = reasoningDetails is null ? BuildReasoningText(message.ContentBlocks) : null;
 
-        return new OpenRouterMessage(
-            message.Role.ToString().ToLowerInvariant(),
-            content,
-            reasoningDetails,
-            reasoning);
+        if (!string.IsNullOrEmpty(content) || reasoningDetails is not null || reasoning is not null)
+        {
+            yield return new OpenRouterMessage(
+                message.Role.ToString().ToLowerInvariant(),
+                content,
+                reasoningDetails,
+                reasoning);
+        }
+
+        foreach (var block in message.ContentBlocks.Where(block => block.Type == ContentBlockType.ToolUse))
+        {
+            yield return new OpenRouterFunctionCall(
+                "function_call",
+                GetProviderItemId(block),
+                block.ToolCallId
+                    ?? throw new InvalidOperationException("Tool-use block is missing toolCallId."),
+                block.Name
+                    ?? throw new InvalidOperationException("Tool-use block is missing name."),
+                block.ArgumentsJson
+                    ?? throw new InvalidOperationException("Tool-use block is missing argumentsJson."));
+        }
+
+        foreach (var block in message.ContentBlocks.Where(block => block.Type == ContentBlockType.ToolResult))
+        {
+            yield return new OpenRouterFunctionCallOutput(
+                "function_call_output",
+                block.ToolCallId
+                    ?? throw new InvalidOperationException("Tool-result block is missing toolCallId."),
+                message.ToolResultContent
+                    ?? throw new InvalidOperationException("Tool-result message is missing resolved payload content."));
+        }
+    }
+
+    private static object? MapToolChoice(ToolChoice? toolChoice)
+    {
+        return toolChoice?.Mode switch
+        {
+            null => null,
+            ToolChoiceMode.Auto => "auto",
+            ToolChoiceMode.None => "none",
+            ToolChoiceMode.Specific => new OpenRouterForcedToolChoice(
+                "function",
+                toolChoice.FunctionName
+                    ?? throw new InvalidOperationException("Specific tool choice is missing a function name.")),
+            _ => throw new InvalidOperationException($"Unsupported tool choice mode '{toolChoice.Mode}'.")
+        };
+    }
+
+    private static string GetProviderItemId(MessageContentBlock block)
+    {
+        if (block.ProviderMetadata is not null)
+        {
+            foreach (var metadata in block.ProviderMetadata)
+            {
+                if (metadata.TryGetValue("item_id", out var value)
+                    && TryGetStringValue(value, out var itemId)
+                    && !string.IsNullOrWhiteSpace(itemId))
+                {
+                    return itemId;
+                }
+            }
+        }
+
+        return block.ToolCallId
+            ?? throw new InvalidOperationException("Tool-use block is missing provider item ID and toolCallId.");
     }
 
     private static IReadOnlyList<IReadOnlyDictionary<string, object?>>? BuildReasoningDetails(IReadOnlyList<MessageContentBlock> blocks)

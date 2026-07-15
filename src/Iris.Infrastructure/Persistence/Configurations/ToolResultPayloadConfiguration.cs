@@ -12,8 +12,8 @@ public class ToolResultPayloadConfiguration : IEntityTypeConfiguration<ToolResul
 
         builder.HasKey(p => p.Id);
 
-        builder.HasIndex(p => p.ConversationId);
-        builder.HasIndex(p => p.ToolCallId);
+        builder.HasIndex(p => new { p.ConversationId, p.ToolCallId })
+            .IsUnique();
 
         builder.Property(p => p.ToolCallId)
             .IsRequired()

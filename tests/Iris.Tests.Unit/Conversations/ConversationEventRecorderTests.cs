@@ -24,9 +24,10 @@ public class ConversationEventRecorderTests
         {
             new ConversationCreated(aggregateId, Guid.NewGuid(), Guid.NewGuid(), "Chat"),
             new MessageSent(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hello"), ChatRole.User),
-            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hi"), "test/model"),
-            new TurnCompleted(aggregateId, 10, 5),
-            new TurnFailed(aggregateId, FailureSource.Provider, "provider_error", "Provider failed.", "partial"),
+            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, Guid.NewGuid(), MessageContentBlocks.Text("Hi"), "test/model", FinishReason.Stop),
+            new ToolExecuted(aggregateId, Guid.NewGuid(), "call-1", "get_current_time", Guid.NewGuid(), ToolExecutionStatus.Succeeded, 12),
+            new TurnCompleted(aggregateId, Guid.NewGuid(), 10, 5),
+            new TurnFailed(aggregateId, Guid.NewGuid(), FailureSource.Provider, "provider_error", "Provider failed.", "partial"),
             new TurnCancelled(aggregateId, "partial"),
             new ModelChanged(aggregateId, "new/model"),
             new ConversationArchived(aggregateId),
@@ -89,6 +90,7 @@ public class ConversationEventRecorderTests
             CancellationToken.None);
         await _publisher.Received(1).Publish(Arg.Any<EventNotification<MessageSent>>(), CancellationToken.None);
         await _publisher.Received(1).Publish(Arg.Any<EventNotification<AssistantResponseCompleted>>(), CancellationToken.None);
+        await _publisher.Received(1).Publish(Arg.Any<EventNotification<ToolExecuted>>(), CancellationToken.None);
         await _publisher.Received(1).Publish(Arg.Any<EventNotification<TurnCompleted>>(), CancellationToken.None);
         await _publisher.Received(1).Publish(Arg.Any<EventNotification<TurnFailed>>(), CancellationToken.None);
         await _publisher.Received(1).Publish(Arg.Any<EventNotification<TurnCancelled>>(), CancellationToken.None);
@@ -154,9 +156,10 @@ public class ConversationEventRecorderTests
         {
             nameof(ConversationCreated) => new ConversationCreated(aggregateId, Guid.NewGuid(), Guid.NewGuid(), "Chat"),
             nameof(MessageSent) => new MessageSent(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hello"), ChatRole.User),
-            nameof(AssistantResponseCompleted) => new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hi"), "test/model"),
-            nameof(TurnCompleted) => new TurnCompleted(aggregateId, 10, 5),
-            nameof(TurnFailed) => new TurnFailed(aggregateId, FailureSource.Provider, "provider_error", "Provider failed.", "partial"),
+            nameof(AssistantResponseCompleted) => new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, Guid.NewGuid(), MessageContentBlocks.Text("Hi"), "test/model", FinishReason.Stop),
+            nameof(ToolExecuted) => new ToolExecuted(aggregateId, Guid.NewGuid(), "call-1", "get_current_time", Guid.NewGuid(), ToolExecutionStatus.Succeeded, 12),
+            nameof(TurnCompleted) => new TurnCompleted(aggregateId, Guid.NewGuid(), 10, 5),
+            nameof(TurnFailed) => new TurnFailed(aggregateId, Guid.NewGuid(), FailureSource.Provider, "provider_error", "Provider failed.", "partial"),
             nameof(TurnCancelled) => new TurnCancelled(aggregateId, "partial"),
             nameof(ModelChanged) => new ModelChanged(aggregateId, "new/model"),
             nameof(ConversationArchived) => new ConversationArchived(aggregateId),

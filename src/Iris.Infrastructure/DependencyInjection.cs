@@ -1,4 +1,5 @@
 ﻿using Iris.Application.AiIntegration;
+using Iris.Application.AiIntegration.Tools;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Queries;
 using Iris.Application.Identity.Interfaces;
@@ -66,6 +67,10 @@ namespace Iris.Infrastructure
             services.AddScoped<IConversationQueries, ConversationQueries>();
             services.AddScoped<IEventStore, EfEventStore>();
             services.AddScoped<IConversationTurnRequestStore, EfConversationTurnRequestStore>();
+            services.AddScoped<IToolResultPayloadStore, EfToolResultPayloadStore>();
+            services.AddScoped<IToolRegistry, ToolRegistry>();
+            services.AddScoped<ITool, GetCurrentTimeTool>();
+            services.AddSingleton(TimeProvider.System);
             services.AddScoped<IPersonaService, PersonaService>();
             services.AddScoped<ISystemPromptService, SystemPromptService>();
             services.AddSingleton<IGlobalSystemPromptProvider, ConfigurationGlobalSystemPromptProvider>();

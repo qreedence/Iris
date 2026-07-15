@@ -383,11 +383,13 @@ public class ConversationEndpointTests
                     new AssistantResponseCompleted(
                         Guid.NewGuid(),
                         conversationId,
+                        Guid.NewGuid(),
                         [
                             MessageContentBlock.Thinking("Let me think"),
                             MessageContentBlock.Text("Answer")
                         ],
-                        "test/model")
+                        "test/model",
+                        FinishReason.Stop)
                 ],
                 TestContext.Current.CancellationToken);
         }

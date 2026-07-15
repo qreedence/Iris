@@ -3,6 +3,7 @@ using System.Text.Json;
 using Iris.Application.AiIntegration.Models;
 using Iris.Application.Conversations;
 using Iris.Application.Identity.Interfaces;
+using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Entities;
 using Iris.Domain.Conversations.Events;
 using Microsoft.Extensions.Options;
@@ -226,10 +227,21 @@ public class ConversationTurnWorker : BackgroundService
             // Idempotency: on a retry the previous attempt may have completed the
             // stream but crashed before marking the row. Skip if a terminal event
             // already exists so we never double-spend tokens.
-            if (request.AttemptCount > 1
-                && await TurnAlreadyTerminalAsync(scope.ServiceProvider, request, stoppingToken))
+            var terminalStatus = request.AttemptCount > 1
+                ? await GetTerminalStatusAsync(scope.ServiceProvider, request, stoppingToken)
+                : null;
+            if (terminalStatus is not null)
             {
-                await UpdateStatusAsync(store => store.MarkCompletedAsync(request.Id, stoppingToken));
+                await UpdateStatusAsync(terminalStatus switch
+                {
+                    ConversationTurnStatus.Completed => store => store.MarkCompletedAsync(request.Id, stoppingToken),
+                    ConversationTurnStatus.Cancelled => store => store.MarkCancelledAsync(request.Id, stoppingToken),
+                    ConversationTurnStatus.Failed => store => store.MarkFailedAsync(
+                        request.Id,
+                        "Terminal failure event was already recorded.",
+                        stoppingToken),
+                    _ => throw new InvalidOperationException($"Unexpected terminal status {terminalStatus}.")
+                });
                 return;
             }
 
@@ -345,6 +357,7 @@ public class ConversationTurnWorker : BackgroundService
             var recorder = provider.GetRequiredService<IConversationEventRecorder>();
             var turnFailed = new TurnFailed(
                 request.ConversationId,
+                request.MessageId,
                 FailureSource.Internal,
                 "interrupted",
                 "The turn was interrupted and could not be completed.",
@@ -369,7 +382,7 @@ public class ConversationTurnWorker : BackgroundService
         }
     }
 
-    private async Task<bool> TurnAlreadyTerminalAsync(
+    private async Task<ConversationTurnStatus?> GetTerminalStatusAsync(
         IServiceProvider provider,
         ConversationTurnRequest request,
         CancellationToken ct)
@@ -399,28 +412,31 @@ public class ConversationTurnWorker : BackgroundService
                 request.MessageId,
                 request.Id,
                 request.ConversationId);
-            return false;
+            return null;
         }
 
         for (var i = messageIndex + 1; i < stream.Count; i++)
         {
             switch (stream[i])
             {
-                case TurnCompleted:
-                case TurnFailed:
-                    return true;
+                case AssistantResponseCompleted response
+                    when response.MessageId == request.MessageId
+                         && response.FinishReason == FinishReason.Stop:
+                    return ConversationTurnStatus.Completed;
+                case TurnCompleted completed when completed.MessageId == request.MessageId:
+                    return ConversationTurnStatus.Completed;
+                case TurnFailed failed when failed.MessageId == request.MessageId:
+                    return ConversationTurnStatus.Failed;
                 case TurnCancelled cancelled:
-                    // A TurnCancelled whose MessageId identifies a DIFFERENT turn
-                    // (a later pending turn cancelled while this one sat crashed)
-                    // must not make this earlier turn look terminal. Legacy events
-                    // (null MessageId) keep positional semantics.
+                    // TurnCancelled remains nullable for the one pre-correlation
+                    // event shape; all new terminal/round events are exact.
                     if (cancelled.MessageId is null || cancelled.MessageId == request.MessageId)
-                        return true;
+                        return ConversationTurnStatus.Cancelled;
                     break;
             }
         }
 
-        return false;
+        return null;
     }
 
     private async Task UpdateStatusAsync(Func<IConversationTurnRequestStore, Task> update)
