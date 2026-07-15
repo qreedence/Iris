@@ -17,13 +17,16 @@ public class OpenRouterChatProviderTests
     private static ChatRequest CreateRequest(
         string model = "test/model",
         string? systemPrompt = null,
-        ModelParameters? modelParameters = null)
+        ModelParameters? modelParameters = null,
+        ToolOptions? toolOptions = null,
+        IReadOnlyList<ChatMessage>? messages = null)
     {
         return new ChatRequest(
             Model: model,
-            Messages: [new ChatMessage(ChatRole.User, MessageContentBlocks.Text("Hello"))],
+            Messages: messages ?? [new ChatMessage(ChatRole.User, MessageContentBlocks.Text("Hello"))],
             SystemPrompt: systemPrompt,
-            ModelParameters: modelParameters
+            ModelParameters: modelParameters,
+            ToolOptions: toolOptions
         );
     }
 
@@ -51,6 +54,44 @@ public class OpenRouterChatProviderTests
         $"event: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":{{\"usage\":{{\"input_tokens\":{input},\"output_tokens\":{output},\"total_tokens\":{total}}}}}}}";
 
     private static string DoneEvent() => "data: [DONE]";
+
+    private static string FunctionCallAddedEvent(
+        int outputIndex,
+        string itemId,
+        string callId,
+        string name,
+        string arguments = "") =>
+        "data: " + JsonSerializer.Serialize(new
+        {
+            type = "response.output_item.added",
+            output_index = outputIndex,
+            item = new
+            {
+                type = "function_call",
+                id = itemId,
+                call_id = callId,
+                name,
+                arguments
+            }
+        });
+
+    private static string FunctionCallDeltaEvent(
+        int outputIndex,
+        string itemId,
+        string delta) =>
+        "data: " + JsonSerializer.Serialize(new
+        {
+            type = "response.function_call_arguments.delta",
+            output_index = outputIndex,
+            item_id = itemId,
+            delta
+        });
+
+    private static JsonElement EmptyObjectSchema()
+    {
+        using var document = JsonDocument.Parse("""{"type":"object","properties":{}}""");
+        return document.RootElement.Clone();
+    }
 
     private static (OpenRouterChatProvider sut, MockHttpHandler handler) CreateProvider(
         HttpResponseMessage response)
@@ -283,7 +324,7 @@ public class OpenRouterChatProviderTests
     }
 
     [Fact]
-    public async Task StreamAsync_EmptyStream_HandlesGracefully()
+    public async Task StreamAsync_EmptyStream_ThrowsProviderException()
     {
         var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
@@ -291,11 +332,33 @@ public class OpenRouterChatProviderTests
         };
         var (sut, _) = CreateProvider(response);
 
-        var chunks = new List<StreamedChunk>();
-        await foreach (var chunk in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
-            chunks.Add(chunk);
+        var act = async () =>
+        {
+            await foreach (var _ in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+            {
+            }
+        };
 
-        chunks.Should().BeEmpty();
+        await act.Should().ThrowAsync<ChatProviderException>()
+            .WithMessage("*without response.completed*");
+    }
+
+    [Fact]
+    public async Task StreamAsync_ResponseFailed_ThrowsProviderException()
+    {
+        var response = CreateStreamResponse(
+            "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"Provider disconnected\"},\"error_type\":\"provider_unavailable\"}}");
+        var (sut, _) = CreateProvider(response);
+
+        var act = async () =>
+        {
+            await foreach (var _ in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+            {
+            }
+        };
+
+        await act.Should().ThrowAsync<ChatProviderException>()
+            .WithMessage("*provider_unavailable*Provider disconnected*");
     }
 
     [Fact]
@@ -313,6 +376,188 @@ public class OpenRouterChatProviderTests
 
         chunks.Should().HaveCount(2);
         chunks.Last().IsComplete.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task StreamAsync_NullToolOptions_OmitsToolFieldsFromRequest()
+    {
+        var (sut, handler) = CreateProvider(CreateStreamResponse(CompletedEvent()));
+
+        await foreach (var _ in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken)) { }
+
+        using var body = JsonDocument.Parse(handler.LastRequestBody!);
+        body.RootElement.TryGetProperty("tools", out _).Should().BeFalse();
+        body.RootElement.TryGetProperty("tool_choice", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task StreamAsync_WithTools_SerializesResponsesApiToolFormat()
+    {
+        var tool = new ToolDefinition("get_current_time", "Get the current time.", EmptyObjectSchema());
+        var request = CreateRequest(toolOptions: new ToolOptions([tool], ToolChoice.Auto));
+        var (sut, handler) = CreateProvider(CreateStreamResponse(CompletedEvent()));
+
+        await foreach (var _ in sut.StreamAsync(request, TestContext.Current.CancellationToken)) { }
+
+        using var body = JsonDocument.Parse(handler.LastRequestBody!);
+        var serializedTool = body.RootElement.GetProperty("tools")[0];
+        serializedTool.GetProperty("type").GetString().Should().Be("function");
+        serializedTool.GetProperty("name").GetString().Should().Be(tool.Name);
+        serializedTool.GetProperty("description").GetString().Should().Be(tool.Description);
+        serializedTool.GetProperty("parameters").GetProperty("type").GetString().Should().Be("object");
+        serializedTool.TryGetProperty("function", out _).Should().BeFalse(
+            "the Responses API uses flat function definitions, unlike legacy Chat Completions");
+        body.RootElement.GetProperty("tool_choice").GetString().Should().Be("auto");
+    }
+
+    [Fact]
+    public async Task StreamAsync_ToolChoice_SerializesAutoNoneAndSpecific()
+    {
+        var tool = new ToolDefinition("get_current_time", "Get the current time.", EmptyObjectSchema());
+        var choices = new[] { ToolChoice.Auto, ToolChoice.None, ToolChoice.Specific(tool.Name) };
+        var handler = new MockHttpHandler(choices.Select(_ => CreateStreamResponse(CompletedEvent())).ToArray());
+        var sut = CreateProviderWithHandler(handler);
+        var bodies = new List<JsonElement>();
+
+        foreach (var choice in choices)
+        {
+            await foreach (var _ in sut.StreamAsync(
+                CreateRequest(toolOptions: new ToolOptions([tool], choice)),
+                TestContext.Current.CancellationToken)) { }
+
+            using var document = JsonDocument.Parse(handler.LastRequestBody!);
+            bodies.Add(document.RootElement.Clone());
+        }
+
+        bodies[0].GetProperty("tool_choice").GetString().Should().Be("auto");
+        bodies[1].GetProperty("tool_choice").GetString().Should().Be("none");
+        bodies[2].GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("function");
+        bodies[2].GetProperty("tool_choice").GetProperty("name").GetString().Should().Be(tool.Name);
+    }
+
+    [Fact]
+    public async Task StreamAsync_FollowUpRequest_SerializesFunctionCallAndOutputItems()
+    {
+        var messages = new ChatMessage[]
+        {
+            new(
+                ChatRole.Assistant,
+                [MessageContentBlock.ToolUse(
+                    "call-123",
+                    "get_current_time",
+                    "{}",
+                    [new Dictionary<string, object?> { ["item_id"] = "fc-123" }])]),
+            new(
+                ChatRole.Tool,
+                [MessageContentBlock.ToolResult("call-123", Guid.NewGuid())],
+                "{\"time\":\"10:30:00Z\"}")
+        };
+        var (sut, handler) = CreateProvider(CreateStreamResponse(CompletedEvent()));
+
+        await foreach (var _ in sut.StreamAsync(
+            CreateRequest(messages: messages),
+            TestContext.Current.CancellationToken)) { }
+
+        using var body = JsonDocument.Parse(handler.LastRequestBody!);
+        var input = body.RootElement.GetProperty("input");
+        input[0].GetProperty("type").GetString().Should().Be("function_call");
+        input[0].GetProperty("id").GetString().Should().Be("fc-123");
+        input[0].GetProperty("call_id").GetString().Should().Be("call-123");
+        input[1].GetProperty("type").GetString().Should().Be("function_call_output");
+        input[1].GetProperty("call_id").GetString().Should().Be("call-123");
+        input[1].GetProperty("output").GetString().Should().Be("{\"time\":\"10:30:00Z\"}");
+    }
+
+    [Fact]
+    public async Task StreamAsync_ToolCallArgumentDeltas_AccumulatesCompleteJson()
+    {
+        var response = CreateStreamResponse(
+            FunctionCallAddedEvent(0, "fc-1", "call-1", "get_weather"),
+            FunctionCallDeltaEvent(0, "fc-1", "{\"loc"),
+            FunctionCallDeltaEvent(0, "fc-1", "ation\":\"Stock"),
+            FunctionCallDeltaEvent(0, "fc-1", "holm\"}"),
+            CompletedEvent());
+        var (sut, _) = CreateProvider(response);
+
+        var chunks = new List<StreamedChunk>();
+        await foreach (var chunk in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+            chunks.Add(chunk);
+
+        var completed = chunks.Should().ContainSingle(c => c.IsComplete).Subject;
+        completed.FinishReason.Should().Be(FinishReason.ToolCalls);
+        var call = completed.ToolCalls.Should().ContainSingle().Subject;
+        call.Id.Should().Be("call-1");
+        call.ProviderItemId.Should().Be("fc-1");
+        call.FunctionName.Should().Be("get_weather");
+        call.ArgumentsJson.Should().Be("{\"location\":\"Stockholm\"}");
+    }
+
+    [Fact]
+    public async Task StreamAsync_MultipleInterleavedToolCalls_AccumulatesByOutputIndex()
+    {
+        var response = CreateStreamResponse(
+            FunctionCallAddedEvent(0, "fc-1", "call-1", "first"),
+            FunctionCallAddedEvent(1, "fc-2", "call-2", "second"),
+            FunctionCallDeltaEvent(1, "fc-2", "{\"b\":"),
+            FunctionCallDeltaEvent(0, "fc-1", "{\"a\":"),
+            FunctionCallDeltaEvent(1, "fc-2", "2}"),
+            FunctionCallDeltaEvent(0, "fc-1", "1}"),
+            CompletedEvent());
+        var (sut, _) = CreateProvider(response);
+
+        var chunks = new List<StreamedChunk>();
+        await foreach (var chunk in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+            chunks.Add(chunk);
+
+        var calls = chunks.Single(c => c.IsComplete).ToolCalls!;
+        calls.Select(c => c.Id).Should().Equal("call-1", "call-2");
+        calls.Select(c => c.ArgumentsJson).Should().Equal("{\"a\":1}", "{\"b\":2}");
+    }
+
+    [Fact]
+    public async Task StreamAsync_NoToolCalls_FinalChunkHasStopFinishReason()
+    {
+        var (sut, _) = CreateProvider(CreateStreamResponse(DeltaEvent("Hi"), CompletedEvent()));
+
+        var chunks = new List<StreamedChunk>();
+        await foreach (var chunk in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+            chunks.Add(chunk);
+
+        var completed = chunks.Single(c => c.IsComplete);
+        completed.FinishReason.Should().Be(FinishReason.Stop);
+        completed.ToolCalls.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task StreamAsync_ToolDeltaBeforeAdded_ThrowsDeserializationException()
+    {
+        var response = CreateStreamResponse(FunctionCallDeltaEvent(0, "fc-1", "{}"));
+        var (sut, _) = CreateProvider(response);
+
+        var act = async () =>
+        {
+            await foreach (var _ in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken)) { }
+        };
+
+        await act.Should().ThrowAsync<ChatDeserializationException>();
+    }
+
+    [Fact]
+    public async Task StreamAsync_ThinkingAndToolCall_BothSurvive()
+    {
+        var response = CreateStreamResponse(
+            ReasoningDeltaEvent("Checking the clock"),
+            FunctionCallAddedEvent(0, "fc-1", "call-1", "get_current_time"),
+            FunctionCallDeltaEvent(0, "fc-1", "{}"),
+            CompletedEvent());
+        var (sut, _) = CreateProvider(response);
+
+        var chunks = new List<StreamedChunk>();
+        await foreach (var chunk in sut.StreamAsync(CreateRequest(), TestContext.Current.CancellationToken))
+            chunks.Add(chunk);
+
+        chunks.Should().Contain(c => c.BlockType == ContentBlockType.Thinking && c.Content == "Checking the clock");
+        chunks.Single(c => c.IsComplete).ToolCalls.Should().ContainSingle(c => c.Id == "call-1");
     }
 
     // --- §4: Error Handling ---

@@ -1,9 +1,11 @@
 using Iris.Application;
 using Iris.Application.AiIntegration;
+using Iris.Application.AiIntegration.Tools;
 using Iris.Application.Conversations;
 using Iris.Application.Identity.Interfaces;
 using Iris.Application.Personas;
 using Iris.Infrastructure;
+using Iris.Infrastructure.AiIntegration;
 using Iris.Infrastructure.Persistence;
 using Iris.Infrastructure.Personas;
 using Iris.Tests.Integration.Helpers;
@@ -55,6 +57,10 @@ public class IntegrationTestFactory : IAsyncLifetime
         services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(EfEventStore).Assembly));
         services.AddScoped<IEventStore, EfEventStore>();
         services.AddScoped<IConversationTurnRequestStore, EfConversationTurnRequestStore>();
+        services.AddScoped<IToolResultPayloadStore, EfToolResultPayloadStore>();
+        services.AddScoped<IToolRegistry, ToolRegistry>();
+        services.AddScoped<ITool, GetCurrentTimeTool>();
+        services.AddSingleton(TimeProvider.System);
         services.AddScoped<IPersonaService, PersonaService>();
         services.AddSingleton<ITurnDoorbell, Iris.Api.Conversations.TurnDoorbell>();
         services.AddSingleton<IActiveTurnRegistry, Iris.Api.Conversations.ActiveTurnRegistry>();

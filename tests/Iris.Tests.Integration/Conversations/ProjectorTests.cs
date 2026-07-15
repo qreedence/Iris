@@ -1,10 +1,15 @@
 using FluentAssertions;
 using Iris.Application.Conversations.Commands.CreateConversation;
+using Iris.Application.AiIntegration.Models;
+using Iris.Application.AiIntegration.Tools;
 using Iris.Domain.AiIntegration;
 using Iris.Tests.Integration.Helpers;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Iris.Domain.Conversations.Content;
+using Iris.Domain.Conversations.Events;
+using Microsoft.Extensions.DependencyInjection;
+using System.Text.Json;
 
 namespace Iris.Tests.Integration.Conversations;
 
@@ -208,5 +213,53 @@ public class ProjectorTests
         MessageContentBlocks.ToVisibleText(messages[0].ContentBlocks).Should().Be("First");
         MessageContentBlocks.ToVisibleText(messages[1].ContentBlocks).Should().Be("Second");
         MessageContentBlocks.ToVisibleText(messages[2].ContentBlocks).Should().Be("Third");
+    }
+
+    [Fact]
+    public async Task RecordToolExecution_PersistsPayloadEventAndProjectedToolMessage()
+    {
+        var conversationId = Guid.NewGuid();
+        var personaId = await CreatePersonaAsync();
+        await SendCommand(new CreateConversationCommand(conversationId, _userId, personaId, "Chat"));
+        var messageId = Guid.NewGuid();
+        var resultJson = "{\"utc\":\"2026-07-14T09:00:00Z\"}";
+
+        ToolExecuted recorded;
+        using (var provider = _factory.CreateServiceProvider())
+        {
+            var recorder = provider.GetRequiredService<IToolExecutionRecorder>();
+            recorded = await recorder.RecordAsync(
+                conversationId,
+                messageId,
+                new ToolCall("call-1", "get_current_time", "{}"),
+                new ToolResult(resultJson, "09:00 UTC", ToolExecutionStatus.Succeeded),
+                14,
+                TestContext.Current.CancellationToken);
+        }
+
+        await using var db = _factory.CreateDbContext();
+        var payload = await db.ToolResultPayloads
+            .SingleAsync(row => row.Id == recorded.PayloadId, TestContext.Current.CancellationToken);
+        var storedEvent = await db.StoredEvents
+            .SingleAsync(row => row.EventType == nameof(ToolExecuted)
+                && row.AggregateId == conversationId, TestContext.Current.CancellationToken);
+        var message = await db.ConversationMessages
+            .SingleAsync(row => row.Id == recorded.PayloadId, TestContext.Current.CancellationToken);
+        var readModel = await db.ConversationReadModels
+            .SingleAsync(row => row.Id == conversationId, TestContext.Current.CancellationToken);
+
+        using var actualPayload = JsonDocument.Parse(payload.PayloadJson);
+        using var expectedPayload = JsonDocument.Parse(resultJson);
+        JsonElement.DeepEquals(actualPayload.RootElement, expectedPayload.RootElement).Should().BeTrue();
+        storedEvent.EventData.Should().NotContain(resultJson,
+            "tool result bodies belong only in the payload table");
+        message.Role.Should().Be(ChatRole.Tool);
+        var block = message.ContentBlocks.Should().ContainSingle().Subject;
+        block.Type.Should().Be(ContentBlockType.ToolResult);
+        block.PayloadId.Should().Be(payload.Id);
+        block.Status.Should().Be(ToolExecutionStatus.Succeeded);
+        block.DurationMs.Should().Be(14);
+        block.Content.Should().Be("09:00 UTC");
+        readModel.MessageCount.Should().Be(1);
     }
 }

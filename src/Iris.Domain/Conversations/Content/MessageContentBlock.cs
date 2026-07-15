@@ -1,3 +1,5 @@
+using Iris.Domain.AiIntegration;
+
 namespace Iris.Domain.Conversations.Content;
 
 public sealed record MessageContentBlock
@@ -17,6 +19,10 @@ public sealed record MessageContentBlock
     public string? ArgumentsJson { get; init; }
 
     public Guid? PayloadId { get; init; }
+
+    public ToolExecutionStatus? Status { get; init; }
+
+    public long? DurationMs { get; init; }
 
     public static MessageContentBlock Text(string content)
     {
@@ -48,7 +54,11 @@ public sealed record MessageContentBlock
         };
     }
 
-    public static MessageContentBlock ToolUse(string toolCallId, string name, string argumentsJson)
+    public static MessageContentBlock ToolUse(
+        string toolCallId,
+        string name,
+        string argumentsJson,
+        IReadOnlyList<IReadOnlyDictionary<string, object?>>? providerMetadata = null)
     {
         return new MessageContentBlock
         {
@@ -56,16 +66,27 @@ public sealed record MessageContentBlock
             ToolCallId = toolCallId,
             Name = name,
             ArgumentsJson = argumentsJson,
+            ProviderMetadata = providerMetadata,
         };
     }
 
-    public static MessageContentBlock ToolResult(string toolCallId, Guid payloadId)
+    public static MessageContentBlock ToolResult(
+        string toolCallId,
+        Guid payloadId,
+        string? name = null,
+        string? preview = null,
+        ToolExecutionStatus? status = null,
+        long? durationMs = null)
     {
         return new MessageContentBlock
         {
             Type = ContentBlockType.ToolResult,
             ToolCallId = toolCallId,
             PayloadId = payloadId,
+            Name = name,
+            Content = preview,
+            Status = status,
+            DurationMs = durationMs,
         };
     }
 }

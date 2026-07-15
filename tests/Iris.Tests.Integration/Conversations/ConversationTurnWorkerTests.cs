@@ -5,9 +5,11 @@ using System.Runtime.CompilerServices;
 using FluentAssertions;
 using Iris.Application.AiIntegration;
 using Iris.Application.AiIntegration.Models;
+using Iris.Application.AiIntegration.Tools;
 using Iris.Application.Conversations;
 using Iris.Application.Conversations.Commands.CreateConversation;
 using Iris.Application.Identity.Interfaces;
+using Iris.Domain.AiIntegration;
 using Iris.Domain.Conversations.Entities;
 using Iris.Domain.Conversations.Events;
 using Iris.Infrastructure.Persistence;
@@ -41,16 +43,16 @@ public class ConversationTurnWorkerTests
     private Task SendCommandAs<TResponse>(Guid userId, IRequest<TResponse> command) =>
         _factory.Services.SendCommandAsAsync(userId, command, TestContext.Current.CancellationToken);
 
-    private async Task<Guid> CreatePersonaAsync()
+    private async Task<Guid> CreatePersonaAsync(string? role = null)
     {
         var persona = await TestPersonas.CreateAsync(
-            _factory.Services, _userId, ct: TestContext.Current.CancellationToken);
+            _factory.Services, _userId, role: role, ct: TestContext.Current.CancellationToken);
         return persona.Id;
     }
 
-    private async Task<Guid> CreateConversationAsync()
+    private async Task<Guid> CreateConversationAsync(string? personaRole = null)
     {
-        var personaId = await CreatePersonaAsync();
+        var personaId = await CreatePersonaAsync(personaRole);
         return await TestConversations.CreateAsync(
             _factory.Services, _userId, personaId, "Chat", TestContext.Current.CancellationToken);
     }
@@ -217,8 +219,8 @@ public class ConversationTurnWorkerTests
                 conversationId,
                 [
                     new MessageSent(message1Id, conversationId, MessageContentBlocks.Text(marker1), Iris.Domain.AiIntegration.ChatRole.User),
-                    new AssistantResponseCompleted(Guid.NewGuid(), conversationId, MessageContentBlocks.Text("turn 1 response"), "test/model"),
-                    new TurnCompleted(conversationId, 1, 1),
+                    new AssistantResponseCompleted(Guid.NewGuid(), conversationId, message1Id, MessageContentBlocks.Text("turn 1 response"), "test/model", FinishReason.Stop),
+                    new TurnCompleted(conversationId, message1Id, 1, 1),
                     new MessageSent(message2Id, conversationId, MessageContentBlocks.Text(marker2), Iris.Domain.AiIntegration.ChatRole.User),
                 ],
                 TestContext.Current.CancellationToken);
@@ -278,6 +280,330 @@ public class ConversationTurnWorkerTests
         // not re-streamed.
         var stream = await LoadStreamAsync(conversationId);
         stream.OfType<TurnCompleted>().Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task Retry_WithRecordedCancellation_MarksRowCancelledWithoutStreaming()
+    {
+        var marker = $"idem-cancelled-{Guid.NewGuid()}";
+        var providerCalls = 0;
+        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                if (call.Arg<ChatRequest>().Messages.Any(m => m.VisibleText == marker))
+                    Interlocked.Increment(ref providerCalls);
+                return DefaultStream(call.ArgAt<CancellationToken>(1));
+            });
+
+        var conversationId = await CreateConversationAsync();
+        var messageId = Guid.NewGuid();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<ICurrentUserService>().OverrideUserId = _userId;
+            var recorder = scope.ServiceProvider.GetRequiredService<IConversationEventRecorder>();
+            await recorder.RecordAsync(
+                conversationId,
+                [
+                    new MessageSent(messageId, conversationId, MessageContentBlocks.Text(marker), ChatRole.User),
+                    new TurnCancelled(conversationId, null, messageId),
+                ],
+                TestContext.Current.CancellationToken);
+        }
+        await SeedStaleTurnAsync(conversationId, messageId);
+
+        await WaitUntilAsync(
+            async () => await GetTurnStatusAsync(conversationId) == ConversationTurnStatus.Cancelled,
+            TimeSpan.FromSeconds(20));
+
+        providerCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Retry_AfterToolCallRound_ExecutesMissingToolAndCompletes()
+    {
+        var marker = $"resume-missing-tool-{Guid.NewGuid()}";
+        var toolCallId = $"call-{Guid.NewGuid()}";
+        var providerCalls = 0;
+
+        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var request = call.Arg<ChatRequest>();
+                if (request.Messages.Any(m => m.VisibleText == marker))
+                {
+                    Interlocked.Increment(ref providerCalls);
+                    request.Messages.Should().Contain(m =>
+                        m.Role == ChatRole.Tool
+                        && m.ContentBlocks.Any(b => b.ToolCallId == toolCallId)
+                        && m.ToolResultContent != null);
+                }
+
+                return DefaultStream(call.ArgAt<CancellationToken>(1));
+            });
+
+        var conversationId = await CreateConversationAsync("orchestrator");
+        var messageId = Guid.NewGuid();
+        await SeedToolRoundAsync(conversationId, messageId, marker, toolCallId);
+        await SeedStaleTurnAsync(conversationId, messageId);
+
+        await WaitUntilAsync(
+            async () => await GetTurnStatusAsync(conversationId) == ConversationTurnStatus.Completed,
+            TimeSpan.FromSeconds(20));
+
+        providerCalls.Should().Be(1, "the intermediate tool-call round must resume rather than look terminal");
+
+        var stream = await LoadStreamAsync(conversationId);
+        stream.OfType<ToolExecuted>().Should().ContainSingle(e => e.ToolCallId == toolCallId);
+        stream.OfType<AssistantResponseCompleted>()
+            .Should().ContainSingle(e => e.MessageId == messageId && e.FinishReason == FinishReason.Stop);
+        stream.OfType<TurnCompleted>().Should().ContainSingle(e => e.MessageId == messageId);
+    }
+
+    [Fact]
+    public async Task Retry_WithRecordedToolResult_SkipsReExecutionAndCompletes()
+    {
+        var marker = $"resume-recorded-tool-{Guid.NewGuid()}";
+        var toolCallId = $"call-{Guid.NewGuid()}";
+        var providerCalls = 0;
+
+        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var request = call.Arg<ChatRequest>();
+                if (request.Messages.Any(m => m.VisibleText == marker))
+                {
+                    Interlocked.Increment(ref providerCalls);
+                    request.Messages.Should().Contain(m =>
+                        m.Role == ChatRole.Tool
+                        && m.ContentBlocks.Any(b => b.ToolCallId == toolCallId)
+                        && m.ToolResultContent == "{\"already\":true}");
+                }
+
+                return DefaultStream(call.ArgAt<CancellationToken>(1));
+            });
+
+        var conversationId = await CreateConversationAsync("orchestrator");
+        var messageId = Guid.NewGuid();
+        await SeedToolRoundAsync(conversationId, messageId, marker, toolCallId);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<ICurrentUserService>().OverrideUserId = _userId;
+            var recorder = scope.ServiceProvider.GetRequiredService<IToolExecutionRecorder>();
+            await recorder.RecordAsync(
+                conversationId,
+                messageId,
+                new ToolCall(toolCallId, "get_current_time", "{}"),
+                new ToolResult("{\"already\":true}", "already recorded", ToolExecutionStatus.Succeeded),
+                4,
+                TestContext.Current.CancellationToken);
+        }
+
+        await SeedStaleTurnAsync(conversationId, messageId);
+
+        await WaitUntilAsync(
+            async () => await GetTurnStatusAsync(conversationId) == ConversationTurnStatus.Completed,
+            TimeSpan.FromSeconds(20));
+
+        providerCalls.Should().Be(1);
+
+        var stream = await LoadStreamAsync(conversationId);
+        stream.OfType<ToolExecuted>().Should().ContainSingle(e => e.ToolCallId == toolCallId);
+
+        using var verificationScope = _factory.Services.CreateScope();
+        var payloadCount = await verificationScope.ServiceProvider.GetRequiredService<AppDbContext>()
+            .ToolResultPayloads
+            .CountAsync(
+                p => p.ConversationId == conversationId && p.ToolCallId == toolCallId,
+                TestContext.Current.CancellationToken);
+        payloadCount.Should().Be(1, "an already durable tool result must not be executed or stored twice");
+    }
+
+    [Fact]
+    public async Task PostChat_ToolRound_CompletesAndRebuildsNextTurnContext()
+    {
+        var firstMarker = $"e2e-tool-{Guid.NewGuid()}";
+        var secondMarker = $"e2e-followup-{Guid.NewGuid()}";
+        var toolCallId = $"call-{Guid.NewGuid()}";
+        ChatRequest? nextTurnRequest = null;
+
+        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var request = call.Arg<ChatRequest>();
+                var ct = call.ArgAt<CancellationToken>(1);
+
+                if (request.Messages.Any(m => m.VisibleText == secondMarker))
+                {
+                    nextTurnRequest = request;
+                    return DefaultStream(ct);
+                }
+
+                if (request.Messages.Any(m => m.VisibleText == firstMarker)
+                    && request.Messages.All(m => m.Role != ChatRole.Tool))
+                {
+                    return ToolCallStream(toolCallId, ct);
+                }
+
+                return DefaultStream(ct);
+            });
+
+        var conversationId = await CreateConversationAsync("orchestrator");
+        await PostChatAsync(conversationId, firstMarker);
+
+        await WaitUntilAsync(
+            async () => await GetTurnStatusAsync(conversationId) == ConversationTurnStatus.Completed,
+            TimeSpan.FromSeconds(20));
+
+        var firstTurnStream = await LoadStreamAsync(conversationId);
+        var firstMessage = firstTurnStream.OfType<MessageSent>().Single(m =>
+            MessageContentBlocks.ToVisibleText(m.ContentBlocks) == firstMarker);
+        firstTurnStream
+            .SkipWhile(e => e != firstMessage)
+            .Select(e => e.GetType())
+            .Should().Equal(
+                typeof(MessageSent),
+                typeof(AssistantResponseCompleted),
+                typeof(ToolExecuted),
+                typeof(AssistantResponseCompleted),
+                typeof(TurnCompleted));
+
+        var rounds = firstTurnStream.OfType<AssistantResponseCompleted>()
+            .Where(e => e.MessageId == firstMessage.Id)
+            .ToList();
+        rounds.Select(e => e.FinishReason).Should().Equal(FinishReason.ToolCalls, FinishReason.Stop);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var messages = await scope.ServiceProvider.GetRequiredService<AppDbContext>()
+                .ConversationMessages
+                .AsNoTracking()
+                .Where(m => m.ConversationId == conversationId)
+                .OrderBy(m => m.CreatedAt)
+                .ToListAsync(TestContext.Current.CancellationToken);
+
+            messages.Select(m => m.Role)
+                .Should().Equal(ChatRole.User, ChatRole.Assistant, ChatRole.Tool, ChatRole.Assistant);
+            messages[1].ContentBlocks.Should().ContainSingle(b => b.Type == ContentBlockType.ToolUse);
+            messages[2].ContentBlocks.Should().ContainSingle(b => b.Type == ContentBlockType.ToolResult);
+        }
+
+        await PostChatAsync(conversationId, secondMarker);
+        await WaitUntilAsync(async () =>
+        {
+            using var scope = _factory.Services.CreateScope();
+            return await scope.ServiceProvider.GetRequiredService<AppDbContext>()
+                .ConversationTurnRequests
+                .CountAsync(
+                    row => row.ConversationId == conversationId
+                        && row.Status == ConversationTurnStatus.Completed,
+                    TestContext.Current.CancellationToken) == 2;
+        }, TimeSpan.FromSeconds(20));
+
+        nextTurnRequest.Should().NotBeNull();
+        nextTurnRequest!.Messages.Select(m => m.Role)
+            .Should().Equal(
+                ChatRole.User,
+                ChatRole.Assistant,
+                ChatRole.Tool,
+                ChatRole.Assistant,
+                ChatRole.User);
+        nextTurnRequest.Messages[2].ToolResultContent.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task CancelChat_AfterToolExecution_KeepsCompletedRoundAndCancelsLoop()
+    {
+        var marker = $"e2e-tool-cancel-{Guid.NewGuid()}";
+        var toolCallId = $"call-{Guid.NewGuid()}";
+        var followUpStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource();
+
+        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var request = call.Arg<ChatRequest>();
+                var ct = call.ArgAt<CancellationToken>(1);
+
+                if (!request.Messages.Any(m => m.VisibleText == marker))
+                    return DefaultStream(ct);
+
+                return request.Messages.Any(m => m.Role == ChatRole.Tool)
+                    ? GatedStream(followUpStarted, release.Task, ct)
+                    : ToolCallStream(toolCallId, ct);
+            });
+
+        var conversationId = await CreateConversationAsync("orchestrator");
+        await PostChatAsync(conversationId, marker);
+        await followUpStarted.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        var response = await _client.PostAsync(
+            $"/api/conversations/{conversationId}/chat/cancel",
+            content: null,
+            TestContext.Current.CancellationToken);
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        await WaitUntilAsync(
+            async () => await GetTurnStatusAsync(conversationId) == ConversationTurnStatus.Cancelled,
+            TimeSpan.FromSeconds(10));
+
+        var stream = await LoadStreamAsync(conversationId);
+        var messageId = stream.OfType<MessageSent>()
+            .Single(m => MessageContentBlocks.ToVisibleText(m.ContentBlocks) == marker)
+            .Id;
+
+        stream.OfType<AssistantResponseCompleted>()
+            .Should().ContainSingle(e => e.MessageId == messageId && e.FinishReason == FinishReason.ToolCalls);
+        stream.OfType<ToolExecuted>().Should().ContainSingle(e => e.MessageId == messageId);
+        stream.OfType<TurnCancelled>().Should().ContainSingle(e => e.MessageId == messageId);
+        stream.OfType<TurnCompleted>().Should().NotContain(e => e.MessageId == messageId);
+
+        release.TrySetResult();
+    }
+
+    private async Task SeedToolRoundAsync(
+        Guid conversationId,
+        Guid messageId,
+        string marker,
+        string toolCallId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<ICurrentUserService>().OverrideUserId = _userId;
+        var recorder = scope.ServiceProvider.GetRequiredService<IConversationEventRecorder>();
+        await recorder.RecordAsync(
+            conversationId,
+            [
+                new MessageSent(messageId, conversationId, MessageContentBlocks.Text(marker), ChatRole.User),
+                new AssistantResponseCompleted(
+                    Guid.NewGuid(),
+                    conversationId,
+                    messageId,
+                    [MessageContentBlock.ToolUse(toolCallId, "get_current_time", "{}")],
+                    "test/model",
+                    FinishReason.ToolCalls,
+                    3,
+                    2),
+            ],
+            TestContext.Current.CancellationToken);
+    }
+
+    private async Task SeedStaleTurnAsync(Guid conversationId, Guid messageId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db.ConversationTurnRequests.Add(new ConversationTurnRequest
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = conversationId,
+            UserId = _userId,
+            MessageId = messageId,
+            Model = "test/model",
+            Status = ConversationTurnStatus.Processing,
+            AttemptCount = 1,
+            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-30),
+            ClaimedAt = DateTimeOffset.UtcNow.AddMinutes(-20),
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
     }
 
     // ── Startup orphan recovery ignores the lease ─────────────────
@@ -521,6 +847,20 @@ public class ConversationTurnWorkerTests
 
     private static IAsyncEnumerable<StreamedChunk> DefaultStream(CancellationToken ct) =>
         ChatProviderMock.DefaultStream(ct);
+
+    private static async IAsyncEnumerable<StreamedChunk> ToolCallStream(
+        string toolCallId,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        yield return new StreamedChunk(
+            null,
+            true,
+            new UsageInfo(3, 2, 5),
+            ToolCalls: [new ToolCall(toolCallId, "get_current_time", "{}", $"fc-{toolCallId}")],
+            FinishReason: FinishReason.ToolCalls);
+        await Task.CompletedTask;
+    }
 
     private static async IAsyncEnumerable<StreamedChunk> GatedStream(
         TaskCompletionSource started,

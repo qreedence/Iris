@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Iris.Application.AiIntegration.Models;
+using Iris.Application.AiIntegration.Tools;
 using Iris.Application.Conversations;
 using Iris.Application.Exceptions;
 using Iris.Application.Personas;
@@ -16,6 +17,8 @@ public class ConversationTurnPreparerTests
     private readonly IEventStore _eventStore = Substitute.For<IEventStore>();
     private readonly IPersonaService _personaService = Substitute.For<IPersonaService>();
     private readonly ISystemPromptAssembler _systemPromptAssembler = Substitute.For<ISystemPromptAssembler>();
+    private readonly IToolRegistry _toolRegistry = Substitute.For<IToolRegistry>();
+    private readonly IToolResultPayloadStore _payloadStore = Substitute.For<IToolResultPayloadStore>();
     private readonly Guid _userId = Guid.NewGuid();
 
     private ConversationTurnPreparer CreateSut()
@@ -23,11 +26,17 @@ public class ConversationTurnPreparerTests
         _systemPromptAssembler
             .BuildAsync(Arg.Any<SystemPromptDto>(), Arg.Any<CancellationToken>())
             .Returns(call => call.Arg<SystemPromptDto>().Identity);
+        _toolRegistry.GetToolsForPersonaAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+        _payloadStore.GetByIdsAsync(Arg.Any<IEnumerable<Guid>>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<Guid, ToolResultPayload>());
 
         return new ConversationTurnPreparer(
             _eventStore,
             _personaService,
             _systemPromptAssembler,
+            _toolRegistry,
+            _payloadStore,
             NullLogger<ConversationTurnPreparer>.Instance);
     }
 
@@ -44,7 +53,7 @@ public class ConversationTurnPreparerTests
             .Returns([
                 new ConversationCreated(conversationId, _userId, personaId, "Chat"),
                 new MessageSent(Guid.NewGuid(), conversationId, MessageContentBlocks.Text("First user message"), ChatRole.User),
-                new AssistantResponseCompleted(Guid.NewGuid(), conversationId, MessageContentBlocks.Text("First assistant response"), "test/model"),
+                new AssistantResponseCompleted(Guid.NewGuid(), conversationId, Guid.NewGuid(), MessageContentBlocks.Text("First assistant response"), "test/model", FinishReason.Stop),
                 new MessageSent(Guid.NewGuid(), conversationId, MessageContentBlocks.Text("Second user message"), ChatRole.User)
             ]);
         SetupPersona(personaId, identity: "You are Iris.");
@@ -396,6 +405,176 @@ public class ConversationTurnPreparerTests
 
         // The ModelChanged after Message A is ignored; model falls to persona pref.
         prepared.ChatRequest.Model.Should().Be("persona/model");
+    }
+
+    [Fact]
+    public async Task PrepareAsync_ToolEnabledPersona_AddsAutomaticToolOptions()
+    {
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
+        SetupExistingConversation(conversationId, personaId);
+        SetupPersona(personaId);
+        using var schema = System.Text.Json.JsonDocument.Parse("""{"type":"object"}""");
+        var tool = new ToolDefinition(
+            "get_current_time",
+            "Get the current time.",
+            schema.RootElement.Clone());
+        _toolRegistry.GetToolsForPersonaAsync(personaId, Arg.Any<CancellationToken>())
+            .Returns([tool]);
+
+        var prepared = await sut.PrepareAsync(
+            _userId,
+            conversationId,
+            Guid.NewGuid(),
+            "fallback/model",
+            changeModel: false,
+            modelParameters: null,
+            TestContext.Current.CancellationToken);
+
+        prepared.PersonaId.Should().Be(personaId);
+        prepared.ChatRequest.ToolOptions.Should().NotBeNull();
+        prepared.ChatRequest.ToolOptions!.Tools.Should().ContainSingle().Which.Should().Be(tool);
+        prepared.ChatRequest.ToolOptions.ToolChoice.Should().Be(ToolChoice.Auto);
+    }
+
+    [Fact]
+    public async Task PrepareAsync_ResumeTurn_IncludesOwnToolRoundsButExcludesLaterQueuedMessage()
+    {
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
+        var messageAId = Guid.NewGuid();
+        var messageBId = Guid.NewGuid();
+        var payloadId = Guid.NewGuid();
+
+        _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
+            .Returns([
+                new ConversationCreated(conversationId, _userId, personaId, "Chat"),
+                new MessageSent(messageAId, conversationId, MessageContentBlocks.Text("Message A"), ChatRole.User),
+                new MessageSent(messageBId, conversationId, MessageContentBlocks.Text("Message B"), ChatRole.User),
+                new AssistantResponseCompleted(
+                    Guid.NewGuid(),
+                    conversationId,
+                    messageAId,
+                    [MessageContentBlock.ToolUse("call-1", "get_current_time", "{}")],
+                    "test/model",
+                    FinishReason.ToolCalls),
+                new ToolExecuted(
+                    conversationId,
+                    messageAId,
+                    "call-1",
+                    "get_current_time",
+                    payloadId,
+                    ToolExecutionStatus.Succeeded,
+                    8),
+            ]);
+        SetupPersona(personaId);
+        _payloadStore.GetByIdsAsync(Arg.Any<IEnumerable<Guid>>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<Guid, ToolResultPayload>
+            {
+                [payloadId] = new()
+                {
+                    Id = payloadId,
+                    ConversationId = conversationId,
+                    ToolCallId = "call-1",
+                    PayloadJson = "{\"utc\":\"09:00Z\"}",
+                    Preview = "09:00 UTC",
+                }
+            });
+
+        var prepared = await sut.PrepareAsync(
+            _userId,
+            conversationId,
+            messageAId,
+            "test/model",
+            changeModel: false,
+            modelParameters: null,
+            TestContext.Current.CancellationToken);
+
+        prepared.ChatRequest.Messages.Select(message => message.Role)
+            .Should().Equal(ChatRole.User, ChatRole.Assistant, ChatRole.Tool);
+        prepared.ChatRequest.Messages.Should().NotContain(message => message.VisibleText == "Message B");
+        var toolResult = prepared.ChatRequest.Messages[2];
+        toolResult.ToolResultContent.Should().Be("{\"utc\":\"09:00Z\"}");
+        toolResult.ContentBlocks.Single().PayloadId.Should().Be(payloadId);
+        toolResult.ContentBlocks.Single().Status.Should().Be(ToolExecutionStatus.Succeeded);
+    }
+
+    [Fact]
+    public async Task PrepareAsync_NextTurn_DropsUnmatchedToolCallsFromCancelledHistory()
+    {
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
+        var cancelledMessageId = Guid.NewGuid();
+        var currentMessageId = Guid.NewGuid();
+
+        _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
+            .Returns([
+                new ConversationCreated(conversationId, _userId, personaId, "Chat"),
+                new MessageSent(cancelledMessageId, conversationId, MessageContentBlocks.Text("First"), ChatRole.User),
+                new AssistantResponseCompleted(
+                    Guid.NewGuid(),
+                    conversationId,
+                    cancelledMessageId,
+                    [MessageContentBlock.ToolUse("call-abandoned", "get_current_time", "{}")],
+                    "test/model",
+                    FinishReason.ToolCalls),
+                new TurnCancelled(conversationId, null, cancelledMessageId),
+                new MessageSent(currentMessageId, conversationId, MessageContentBlocks.Text("Second"), ChatRole.User),
+            ]);
+        SetupPersona(personaId);
+
+        var prepared = await sut.PrepareAsync(
+            _userId,
+            conversationId,
+            currentMessageId,
+            "test/model",
+            changeModel: false,
+            modelParameters: null,
+            TestContext.Current.CancellationToken);
+
+        prepared.ChatRequest.Messages.Select(message => message.Role)
+            .Should().Equal(ChatRole.User, ChatRole.User);
+        prepared.ChatRequest.Messages.SelectMany(message => message.ContentBlocks)
+            .Should().NotContain(block => block.ToolCallId == "call-abandoned");
+    }
+
+    [Fact]
+    public async Task PrepareAsync_Retry_DoesNotRecordDuplicateModelChange()
+    {
+        var sut = CreateSut();
+        var conversationId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+
+        _eventStore.LoadStreamAsync(conversationId, Arg.Any<CancellationToken>())
+            .Returns([
+                new ConversationCreated(conversationId, _userId, personaId, "Chat"),
+                new MessageSent(messageId, conversationId, MessageContentBlocks.Text("Hello"), ChatRole.User),
+                new ModelChanged(conversationId, "new/model"),
+                new AssistantResponseCompleted(
+                    Guid.NewGuid(),
+                    conversationId,
+                    messageId,
+                    [MessageContentBlock.ToolUse("call-1", "get_current_time", "{}")],
+                    "new/model",
+                    FinishReason.ToolCalls),
+            ]);
+        SetupPersona(personaId);
+
+        var prepared = await sut.PrepareAsync(
+            _userId,
+            conversationId,
+            messageId,
+            "new/model",
+            changeModel: true,
+            modelParameters: null,
+            TestContext.Current.CancellationToken);
+
+        prepared.ChatRequest.Model.Should().Be("new/model");
+        prepared.PreStreamEvents.Should().BeEmpty();
     }
 
 

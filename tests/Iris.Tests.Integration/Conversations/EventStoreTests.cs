@@ -69,7 +69,7 @@ public class EventStoreTests
         {
             new ConversationCreated(aggregateId, Guid.NewGuid(), Guid.NewGuid(), "Chat"),
             new MessageSent(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hello"), ChatRole.User),
-            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hi there!"), "test/model"),
+            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, Guid.NewGuid(), MessageContentBlocks.Text("Hi there!"), "test/model", FinishReason.Stop),
         };
 
         // Act
@@ -116,7 +116,7 @@ public class EventStoreTests
 
         await sut.AppendAsync(aggregateId, [
             new MessageSent(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hello"), ChatRole.User),
-            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hi!"), "test/model"),
+            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, Guid.NewGuid(), MessageContentBlocks.Text("Hi!"), "test/model", FinishReason.Stop),
         ], Guid.NewGuid(), TestContext.Current.CancellationToken);
 
         // Act — use a fresh context to ensure we're reading from DB
@@ -230,9 +230,9 @@ public class EventStoreTests
         {
             new ConversationCreated(aggregateId, Guid.NewGuid(), personaId, "My Chat"),
             new MessageSent(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("What is the meaning of life?"), ChatRole.User),
-            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("42, obviously."), "anthropic/claude-sonnet-4"),
-            new TurnCompleted(aggregateId, 150, 42),
-            new TurnFailed(aggregateId, FailureSource.Provider, "rate_limited", "Rate limit exceeded.", "partial answer"),
+            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, Guid.NewGuid(), MessageContentBlocks.Text("42, obviously."), "anthropic/claude-sonnet-4", FinishReason.Stop),
+            new TurnCompleted(aggregateId, Guid.NewGuid(), 150, 42),
+            new TurnFailed(aggregateId, Guid.NewGuid(), FailureSource.Provider, "rate_limited", "Rate limit exceeded.", "partial answer"),
             new TurnCancelled(aggregateId, "cancelled partial"),
             new ModelChanged(aggregateId, "openai/gpt-4.1"),
             new ConversationArchived(aggregateId),
@@ -296,11 +296,13 @@ public class EventStoreTests
                 new AssistantResponseCompleted(
                     messageId,
                     aggregateId,
+                    Guid.NewGuid(),
                     [
                         MessageContentBlock.Thinking("Let me think"),
                         MessageContentBlock.Text("Answer")
                     ],
-                    "test/model")
+                    "test/model",
+                    FinishReason.Stop)
             ],
             Guid.NewGuid(),
             TestContext.Current.CancellationToken);
@@ -314,8 +316,37 @@ public class EventStoreTests
 
         contentBlocks[0].GetProperty("type").GetString().Should().Be("thinking");
         contentBlocks[1].GetProperty("type").GetString().Should().Be("text");
+        eventJson.RootElement.GetProperty("finishReason").GetString().Should().Be("Stop");
         stored.EventData.Should().NotContain("\"Thinking\"");
         stored.EventData.Should().NotContain("\"Text\"");
+    }
+
+    [Fact]
+    public async Task AppendAndLoad_ToolExecuted_RoundTripsWithStringStatus()
+    {
+        await using var db = _factory.CreateDbContext();
+        var sut = CreateSut(db);
+        var conversationId = Guid.NewGuid();
+        var expected = new ToolExecuted(
+            conversationId,
+            Guid.NewGuid(),
+            "call-1",
+            "get_current_time",
+            Guid.NewGuid(),
+            ToolExecutionStatus.Succeeded,
+            11);
+
+        await sut.AppendAsync(
+            conversationId,
+            [expected],
+            Guid.NewGuid(),
+            TestContext.Current.CancellationToken);
+
+        var stream = await sut.LoadStreamAsync(conversationId, TestContext.Current.CancellationToken);
+        stream.Should().ContainSingle().Which.Should().Be(expected);
+        var stored = await db.StoredEvents
+            .SingleAsync(row => row.AggregateId == conversationId, TestContext.Current.CancellationToken);
+        stored.EventData.Should().Contain("\"status\":\"Succeeded\"");
     }
 
     [Fact]
@@ -384,8 +415,8 @@ public class EventStoreTests
         ], Guid.NewGuid(), TestContext.Current.CancellationToken);
 
         await sut.AppendAsync(aggregateId, [
-            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, MessageContentBlocks.Text("Hi!"), "test/model"),
-            new TurnCompleted(aggregateId, 10, 5),
+            new AssistantResponseCompleted(Guid.NewGuid(), aggregateId, Guid.NewGuid(), MessageContentBlocks.Text("Hi!"), "test/model", FinishReason.Stop),
+            new TurnCompleted(aggregateId, Guid.NewGuid(), 10, 5),
         ], Guid.NewGuid(), TestContext.Current.CancellationToken);
 
         // Assert — verify continuous sequence across both appends

@@ -26,13 +26,14 @@ public static class TestPersonas
         string name = "Iris",
         SystemPromptSectionsRequest? systemPrompt = null,
         string? modelPreference = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? role = null)
     {
         using var scope = services.CreateScope();
         var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
         return await personaService.CreateAsync(
             userId,
-            new CreatePersonaRequest(name, systemPrompt, ModelPreference: modelPreference),
+            new CreatePersonaRequest(name, systemPrompt, ModelPreference: modelPreference, Role: role),
             ct);
     }
 }
