@@ -106,17 +106,24 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
             {
                 ct.ThrowIfCancellationRequested();
                 partialContent = null;
+
+                // QRE-402: every streamed chunk carries the id of the message row it
+                // belongs to. Each model round gets its own id, minted up front so the
+                // round's chunks and its AssistantResponseCompleted event (= the
+                // projected message row) share it. The initiating user messageId
+                // remains the turn-correlation id on all recorded events.
+                var roundId = Guid.NewGuid();
                 var round = await StreamRoundAsync(
                     request,
                     conversationId,
-                    messageId,
+                    roundId,
                     value => partialContent = value,
                     ct);
                 totalInputTokens += round.Usage?.InputTokens ?? 0;
                 totalOutputTokens += round.Usage?.OutputTokens ?? 0;
 
                 var assistantResponseCompleted = new AssistantResponseCompleted(
-                    Guid.NewGuid(),
+                    roundId,
                     conversationId,
                     messageId,
                     round.ContentBlocks,
@@ -152,7 +159,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
 
                 await SendCompletedToolUseBlocksAsync(
                     conversationId,
-                    messageId,
+                    roundId,
                     round.ContentBlocks,
                     ct);
 
@@ -234,7 +241,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
     private async Task<ProviderRound> StreamRoundAsync(
         ChatRequest request,
         Guid conversationId,
-        Guid messageId,
+        Guid roundId,
         Action<string?> updatePartialContent,
         CancellationToken ct)
     {
@@ -257,7 +264,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
                         conversationId,
                         new ChatStreamChunkDto(
                             conversationId,
-                            messageId,
+                            roundId,
                             chunk.BlockType,
                             chunk.BlockIndex,
                             chunk.Content),
@@ -318,11 +325,14 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
                 durationMs);
             messages.Add(new ChatMessage(ChatRole.Tool, [resultBlock], result.PayloadJson));
 
+            // QRE-402: the tool_result chunk's MessageId is the Tool-role message
+            // row's id, which the ToolExecutedProjector sets to the PayloadId —
+            // streaming and history address the same row.
             await _notifier.SendChunkAsync(
                 conversationId,
                 new ChatStreamChunkDto(
                     conversationId,
-                    messageId,
+                    toolExecuted.PayloadId,
                     ContentBlockType.ToolResult,
                     0,
                     result.Preview,
@@ -339,7 +349,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
 
     private async Task SendCompletedToolUseBlocksAsync(
         Guid conversationId,
-        Guid messageId,
+        Guid roundId,
         IReadOnlyList<MessageContentBlock> contentBlocks,
         CancellationToken ct)
     {
@@ -353,7 +363,7 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
                 conversationId,
                 new ChatStreamChunkDto(
                     conversationId,
-                    messageId,
+                    roundId,
                     ContentBlockType.ToolUse,
                     i,
                     null,
