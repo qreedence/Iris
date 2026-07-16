@@ -2,6 +2,7 @@ using FluentAssertions;
 using Iris.Domain.Personas;
 using Iris.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 
 namespace Iris.Tests.Integration.Persistence;
 
@@ -36,5 +37,20 @@ public class SystemPromptModelMappingTests
             .Which.Name.Should().Be(nameof(SystemPrompt.PersonaId));
         entityType.FindProperty("AppContext").Should().BeNull();
         entityType.FindProperty("Guidelines").Should().BeNull();
+    }
+
+    [Fact]
+    public void PersonaKindModel_UsesStringStorageAndDefaultsExistingRowsToUser()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var property = db.Model.FindEntityType(typeof(Persona))!
+            .FindProperty(nameof(Persona.Kind));
+
+        property.Should().NotBeNull();
+        property!.GetDefaultValue().Should().Be(PersonaKind.User);
+        property.GetTypeMapping().Converter.Should().NotBeNull();
+        property.GetMaxLength().Should().Be(20);
     }
 }

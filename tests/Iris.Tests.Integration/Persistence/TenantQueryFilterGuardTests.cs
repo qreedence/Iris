@@ -267,6 +267,40 @@ public class TenantQueryFilterGuardTests
             "ToolResultPayloads is intentionally unfiltered; isolation comes from the owning conversation access path");
     }
 
+    // ── PersonaCreationToolExecutions — intentionally NOT filtered ──
+
+    [Fact]
+    public async Task PersonaCreationToolExecutions_HasNoQueryFilter_OtherUsersRowsAreVisibleWithoutIgnoreQueryFilters()
+    {
+        // This is a conversation-scoped idempotency ledger, not a user-facing
+        // query surface. Like ToolResultPayloads, isolation is enforced through
+        // the owning conversation before tool execution reaches this table.
+        var personaId = await CreatePersonaAsync(_userA);
+        var conversationId = await CreateConversationAsync(_userA, personaId);
+
+        using (var seedScope = CreateScopeAs(_userA))
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.PersonaCreationToolExecutions.Add(new PersonaCreationToolExecution
+            {
+                ConversationId = conversationId,
+                ToolCallId = "create-persona-call-1",
+                PersonaId = personaId,
+                CreatedAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        using var scope = CreateScopeAs(_userB);
+        var readDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var rows = await readDb.PersonaCreationToolExecutions
+            .Where(execution => execution.ConversationId == conversationId)
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        rows.Should().ContainSingle(execution => execution.PersonaId == personaId,
+            "PersonaCreationToolExecutions is intentionally unfiltered; isolation comes from the owning conversation access path");
+    }
+
     // ── ConversationTurnRequests — intentionally NOT filtered ───────
 
     [Fact]

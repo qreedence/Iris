@@ -19,6 +19,15 @@ public class PersonaConfiguration : IEntityTypeConfiguration<Persona>
             .IsRequired()
             .HasMaxLength(100);
 
+        builder.Property(p => p.Kind)
+            .HasConversion<string>()
+            .HasMaxLength(20)
+            .HasDefaultValue(PersonaKind.User);
+
+        builder.HasIndex(p => p.UserId, "IX_personas_UserId_System")
+            .IsUnique()
+            .HasFilter("\"Kind\" = 'System' AND \"IsDeleted\" = false");
+
         builder.Property(p => p.ModelPreference)
             .HasMaxLength(100);
 

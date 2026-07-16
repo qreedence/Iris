@@ -8,6 +8,7 @@ using Iris.Infrastructure.Persistence;
 using Iris.Tests.Integration.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Iris.Domain.Personas;
 
 namespace Iris.Tests.Integration.Personas;
 
@@ -42,16 +43,49 @@ public class PersonaCrudEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
 
         var persona = await response.Content.ReadFromJsonAsync<PersonaDto>(
+            TestJson.Options,
             cancellationToken: TestContext.Current.CancellationToken);
 
         persona.Should().NotBeNull();
         persona!.Id.Should().NotBe(Guid.Empty);
         persona.Name.Should().Be("Iris");
+        persona.Kind.Should().Be(PersonaKind.User);
         persona.SystemPrompt.Identity.Should().Be("Be concise.");
         persona.SystemPrompt.Voice.Should().BeNull();
         persona.CreatedAt.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(10));
         persona.UpdatedAt.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(10));
         response.Headers.Location.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task PostPersona_KindSmuggledInJson_StillCreatesUserPersona()
+    {
+        var response = await _client.PostAsJsonAsync(
+            "/api/personas",
+            new { name = "Not System", kind = "System" },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var persona = await response.Content.ReadFromJsonAsync<PersonaDto>(
+            TestJson.Options,
+            cancellationToken: TestContext.Current.CancellationToken);
+        persona!.Kind.Should().Be(PersonaKind.User);
+    }
+
+    [Fact]
+    public async Task GetPersonas_IncludesSystemOrchestratorWithKind()
+    {
+        var orchestrator = await ProvisionOrchestratorAsync(_userId);
+
+        var response = await _client.GetAsync(
+            "/api/personas",
+            TestContext.Current.CancellationToken);
+
+        var personas = await response.Content.ReadFromJsonAsync<List<PersonaDto>>(
+            TestJson.Options,
+            cancellationToken: TestContext.Current.CancellationToken);
+        personas.Should().ContainSingle(persona =>
+            persona.Id == orchestrator.PersonaId && persona.Kind == PersonaKind.System);
     }
 
     [Fact]
@@ -84,6 +118,7 @@ public class PersonaCrudEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var personas = await response.Content.ReadFromJsonAsync<List<PersonaDto>>(
+            TestJson.Options,
             cancellationToken: TestContext.Current.CancellationToken);
 
         personas.Should().NotBeNull();
@@ -108,6 +143,7 @@ public class PersonaCrudEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var persona = await response.Content.ReadFromJsonAsync<PersonaDto>(
+            TestJson.Options,
             cancellationToken: TestContext.Current.CancellationToken);
 
         persona.Should().NotBeNull();
@@ -161,6 +197,7 @@ public class PersonaCrudEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var updated = await response.Content.ReadFromJsonAsync<PersonaDto>(
+            TestJson.Options,
             cancellationToken: TestContext.Current.CancellationToken);
 
         updated.Should().NotBeNull();
@@ -170,6 +207,33 @@ public class PersonaCrudEndpointTests
         updated.ModelPreference.Should().Be("test/model");
         updated.Avatar.Should().Be("https://example.com/avatar.png");
         updated.UpdatedAt.Should().BeOnOrAfter(created.UpdatedAt);
+    }
+
+    [Fact]
+    public async Task GetPersona_OtherUsersSystemOrchestrator_Returns404()
+    {
+        var otherUserId = Guid.NewGuid();
+        var orchestrator = await ProvisionOrchestratorAsync(otherUserId);
+
+        var response = await _client.GetAsync(
+            $"/api/personas/{orchestrator.PersonaId}",
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task PutPersona_SystemPersona_Returns400AndDoesNotModifyRow()
+    {
+        var orchestrator = await ProvisionOrchestratorAsync(_userId);
+
+        var response = await _client.PutAsJsonAsync(
+            $"/api/personas/{orchestrator.PersonaId}",
+            new UpdatePersonaRequest("Changed"),
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await GetPersonaDirectAsync(_userId, orchestrator.PersonaId)).Name.Should().Be("Iris");
     }
 
     [Fact]
@@ -209,6 +273,19 @@ public class PersonaCrudEndpointTests
         // Assert
         deleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
         getResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task DeletePersona_SystemPersona_Returns400AndDoesNotSoftDeleteRow()
+    {
+        var orchestrator = await ProvisionOrchestratorAsync(_userId);
+
+        var response = await _client.DeleteAsync(
+            $"/api/personas/{orchestrator.PersonaId}",
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await GetPersonaDirectAsync(_userId, orchestrator.PersonaId)).Kind.Should().Be(PersonaKind.System);
     }
 
     [Fact]
@@ -258,6 +335,7 @@ public class PersonaCrudEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
 
         var persona = await response.Content.ReadFromJsonAsync<PersonaDto>(
+            TestJson.Options,
             cancellationToken: TestContext.Current.CancellationToken);
 
         persona!.Role.Should().Be("Backend Architect");
@@ -275,6 +353,7 @@ public class PersonaCrudEndpointTests
 
         // Assert
         var persona = await response.Content.ReadFromJsonAsync<PersonaDto>(
+            TestJson.Options,
             cancellationToken: TestContext.Current.CancellationToken);
 
         persona!.Role.Should().BeNull();
@@ -320,6 +399,7 @@ public class PersonaCrudEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var updated = await response.Content.ReadFromJsonAsync<PersonaDto>(
+            TestJson.Options,
             cancellationToken: TestContext.Current.CancellationToken);
 
         updated!.Role.Should().Be("QA Engineer");
@@ -347,5 +427,12 @@ public class PersonaCrudEndpointTests
         userService.OverrideUserId = userId;
         var personaService = scope.ServiceProvider.GetRequiredService<IPersonaService>();
         return await personaService.GetByIdAsync(personaId, TestContext.Current.CancellationToken);
+    }
+
+    private async Task<OrchestratorProvisioningResult> ProvisionOrchestratorAsync(Guid userId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var provisioner = scope.ServiceProvider.GetRequiredService<IOrchestratorProvisioner>();
+        return await provisioner.EnsureProvisionedAsync(userId, TestContext.Current.CancellationToken);
     }
 }

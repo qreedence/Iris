@@ -1,4 +1,5 @@
 using System.Text;
+using Iris.Domain.Personas;
 
 namespace Iris.Application.Personas;
 
@@ -11,7 +12,20 @@ public class SystemPromptAssembler : ISystemPromptAssembler
         _globalSystemPromptProvider = globalSystemPromptProvider;
     }
 
-    public async Task<string?> BuildAsync(SystemPromptDto systemPrompt, CancellationToken ct = default)
+    public Task<string?> BuildAsync(SystemPromptDto systemPrompt, CancellationToken ct = default)
+    {
+        return BuildCoreAsync(systemPrompt, isSystemPersona: false, ct);
+    }
+
+    public Task<string?> BuildAsync(PersonaDto persona, CancellationToken ct = default)
+    {
+        return BuildCoreAsync(persona.SystemPrompt, persona.Kind == PersonaKind.System, ct);
+    }
+
+    private async Task<string?> BuildCoreAsync(
+        SystemPromptDto systemPrompt,
+        bool isSystemPersona,
+        CancellationToken ct)
     {
         var globalSections = await _globalSystemPromptProvider.GetAsync(ct);
         var builder = new StringBuilder();
@@ -19,9 +33,16 @@ public class SystemPromptAssembler : ISystemPromptAssembler
         AppendSection(builder, "app_context", globalSections.AppContext);
         AppendSection(builder, "guidelines", globalSections.Guidelines);
 
-        foreach (var definition in SystemPromptSections.All)
+        if (isSystemPersona)
         {
-            AppendSection(builder, definition.TagName, definition.GetFromDto(systemPrompt));
+            AppendSection(builder, "orchestrator", globalSections.Orchestrator);
+        }
+        else
+        {
+            foreach (var definition in SystemPromptSections.All)
+            {
+                AppendSection(builder, definition.TagName, definition.GetFromDto(systemPrompt));
+            }
         }
 
         return builder.Length == 0 ? null : builder.ToString();

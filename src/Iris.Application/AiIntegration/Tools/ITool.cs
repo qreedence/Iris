@@ -5,6 +5,7 @@ namespace Iris.Application.AiIntegration.Tools;
 public interface ITool
 {
     ToolDefinition Definition { get; }
+    string FailureMessage => "Tool execution failed.";
 
     Task<ToolResult> ExecuteAsync(
         string argumentsJson,

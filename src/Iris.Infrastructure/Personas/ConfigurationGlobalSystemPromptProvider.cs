@@ -18,6 +18,7 @@ public class ConfigurationGlobalSystemPromptProvider : IGlobalSystemPromptProvid
 
         return Task.FromResult(new GlobalSystemPromptSections(
             options.AppContext,
-            options.Guidelines));
+            options.Guidelines,
+            options.Orchestrator));
     }
 }

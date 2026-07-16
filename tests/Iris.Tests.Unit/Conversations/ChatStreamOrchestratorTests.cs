@@ -778,13 +778,13 @@ public class ChatStreamOrchestratorTests
         SetupPreparedTurn(conversationId);
 
         var chunks = new List<ChatStreamChunkDto>();
-        _notifier.SendChunkAsync(
+        _ = _notifier.SendChunkAsync(
             Arg.Any<Guid>(),
             Arg.Do<ChatStreamChunkDto>(chunks.Add),
             Arg.Any<CancellationToken>());
 
         var recordedRounds = new List<AssistantResponseCompleted>();
-        _eventRecorder.RecordAsync(
+        _ = _eventRecorder.RecordAsync(
             conversationId,
             Arg.Do<IEnumerable<ConversationEvent>>(events =>
                 recordedRounds.AddRange(events.OfType<AssistantResponseCompleted>())),
@@ -836,7 +836,7 @@ public class ChatStreamOrchestratorTests
         SetupPreparedTurn(conversationId);
 
         var chunks = new List<ChatStreamChunkDto>();
-        _notifier.SendChunkAsync(
+        _ = _notifier.SendChunkAsync(
             Arg.Any<Guid>(),
             Arg.Do<ChatStreamChunkDto>(chunks.Add),
             Arg.Any<CancellationToken>());

@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
+using Iris.Application.Personas;
 
 namespace Iris.Infrastructure.Identity
 {
@@ -17,17 +18,20 @@ namespace Iris.Infrastructure.Identity
         private readonly JwtOptions _jwtOptions;
         private readonly AppDbContext _db;
         private readonly ITokenService _tokenService;
+        private readonly IOrchestratorProvisioner _orchestratorProvisioner;
 
         public AuthService(
             UserManager<ApplicationUser> userManager,
             IOptions<JwtOptions> jwtOptions,
             AppDbContext db,
-            ITokenService tokenService)
+            ITokenService tokenService,
+            IOrchestratorProvisioner orchestratorProvisioner)
         {
             _userManager = userManager;
             _jwtOptions = jwtOptions.Value;
             _db = db;
             _tokenService = tokenService;
+            _orchestratorProvisioner = orchestratorProvisioner;
         }
 
         public async Task<AuthTokenResult> HandleSocialLoginAsync(LoginProvider provider, ClaimsPrincipal claims, CancellationToken ct = default)
@@ -64,6 +68,10 @@ namespace Iris.Infrastructure.Identity
                 if (!addLoginResult.Succeeded)
                     throw new ValidationException(addLoginResult.Errors.First().Description);
             }
+
+            // Login is also the repair path for users created before orchestrator
+            // provisioning existed or left partially provisioned by an earlier failure.
+            await _orchestratorProvisioner.EnsureProvisionedAsync(user.Id, ct);
 
             var now = DateTimeOffset.UtcNow;
             var refreshTokenString = await _tokenService.GenerateRefreshTokenAsync(ct);

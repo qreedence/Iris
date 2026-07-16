@@ -69,9 +69,10 @@ namespace Iris.Infrastructure
             services.AddScoped<IConversationTurnRequestStore, EfConversationTurnRequestStore>();
             services.AddScoped<IToolResultPayloadStore, EfToolResultPayloadStore>();
             services.AddScoped<IToolRegistry, ToolRegistry>();
-            services.AddScoped<ITool, GetCurrentTimeTool>();
+            services.AddScoped<ITool, CreatePersonaTool>();
             services.AddSingleton(TimeProvider.System);
             services.AddScoped<IPersonaService, PersonaService>();
+            services.AddScoped<IOrchestratorProvisioner, OrchestratorProvisioner>();
             services.AddScoped<ISystemPromptService, SystemPromptService>();
             services.AddSingleton<IGlobalSystemPromptProvider, ConfigurationGlobalSystemPromptProvider>();
             services.AddScoped<ITokenService, JwtTokenService>();

@@ -69,6 +69,7 @@ public class PersonasController : ControllerBase
 
     [HttpGet("{id:guid}/system-prompt")]
     [ProducesResponseType<SystemPromptDto>(200)]
+    [ProducesResponseType<ProblemDetails>(400)]
     [ProducesResponseType<ProblemDetails>(404)]
     public async Task<IActionResult> GetSystemPrompt(
         Guid id,
@@ -135,6 +136,7 @@ public class PersonasController : ControllerBase
 
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(204)]
+    [ProducesResponseType<ProblemDetails>(400)]
     [ProducesResponseType<ProblemDetails>(404)]
     public async Task<IActionResult> Delete(
         Guid id,

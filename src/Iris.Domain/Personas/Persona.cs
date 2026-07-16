@@ -5,7 +5,8 @@ public class Persona
     public Guid Id { get; set; }
     public Guid UserId { get; set; }
     public string Name { get; set; } = string.Empty;
-    public SystemPrompt SystemPrompt { get; set; } = null!;
+    public PersonaKind Kind { get; set; } = PersonaKind.User;
+    public SystemPrompt? SystemPrompt { get; set; }
     public string? ModelPreference { get; set; }
     public string? Role { get; set; }
     public string? Group { get; set; }

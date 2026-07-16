@@ -3,14 +3,14 @@ using Iris.Application.AiIntegration.Models;
 using Iris.Application.AiIntegration.Tools;
 using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
+using Iris.Domain.Personas;
+using Iris.Application.Exceptions;
 using Microsoft.Extensions.Logging;
 
 namespace Iris.Infrastructure.AiIntegration;
 
 public class ToolRegistry : IToolRegistry
 {
-    public const string OrchestratorRole = "orchestrator";
-
     private readonly IPersonaService _personaService;
     private readonly IReadOnlyDictionary<string, ITool> _tools;
     private readonly ILogger<ToolRegistry> _logger;
@@ -31,7 +31,7 @@ public class ToolRegistry : IToolRegistry
     {
         var persona = await _personaService.GetByIdAsync(personaId, ct);
 
-        if (!string.Equals(persona.Role, OrchestratorRole, StringComparison.OrdinalIgnoreCase))
+        if (persona.Kind != PersonaKind.System)
             return [];
 
         return _tools.Values
@@ -73,6 +73,16 @@ public class ToolRegistry : IToolRegistry
         {
             throw;
         }
+        catch (ValidationException ex)
+        {
+            _logger.LogInformation(
+                "Tool {ToolName} rejected validation for conversation {ConversationId}: {ValidationMessage}",
+                toolCall.FunctionName,
+                context.ConversationId,
+                ex.Message);
+
+            return Failure(ex.Message);
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(
@@ -81,9 +91,7 @@ public class ToolRegistry : IToolRegistry
                 toolCall.FunctionName,
                 context.ConversationId);
 
-            // TODO(QRE-333): Define a safe model-facing error policy before tools can touch
-            // user or database data. Raw exception messages may contain sensitive details.
-            return Failure(ex.Message);
+            return Failure(tool.FailureMessage);
         }
     }
 

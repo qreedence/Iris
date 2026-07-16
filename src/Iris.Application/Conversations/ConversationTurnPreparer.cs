@@ -85,7 +85,7 @@ public class ConversationTurnPreparer : IConversationTurnPreparer
             effectiveModel = requestedModel;
         }
 
-        var assembledSystemPrompt = await _systemPromptAssembler.BuildAsync(persona.SystemPrompt, ct);
+        var assembledSystemPrompt = await _systemPromptAssembler.BuildAsync(persona, ct);
         var tools = await _toolRegistry.GetToolsForPersonaAsync(persona.Id, ct);
 
         var chatRequest = new ChatRequest(
