@@ -5,6 +5,9 @@ using Iris.Domain.Identity.Enums;
 using Iris.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
+using Iris.Infrastructure.Persistence;
+using Iris.Domain.Personas;
+using Microsoft.EntityFrameworkCore;
 
 namespace Iris.Tests.Integration.Auth;
 
@@ -43,6 +46,37 @@ public class AuthServiceAccountLinkingTests
         logins.Should().ContainSingle(login =>
             login.LoginProvider == LoginProvider.Google.ToString()
             && login.ProviderKey == providerUserId);
+    }
+
+    [Fact]
+    public async Task HandleSocialLoginAsync_NewThenReturningUser_ProvisionsOrchestratorExactlyOnce()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var authService = scope.ServiceProvider.GetRequiredService<IAuthService>();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var currentUser = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var email = $"provision-{Guid.NewGuid()}@iris.local";
+        var principal = CreatePrincipal(email, $"google-{Guid.NewGuid()}");
+
+        await authService.HandleSocialLoginAsync(
+            LoginProvider.Google,
+            principal,
+            TestContext.Current.CancellationToken);
+        await authService.HandleSocialLoginAsync(
+            LoginProvider.Google,
+            principal,
+            TestContext.Current.CancellationToken);
+
+        var user = await userManager.FindByEmailAsync(email);
+        currentUser.OverrideUserId = user!.Id;
+        var orchestrators = await db.Personas
+            .Where(persona => persona.Kind == PersonaKind.System)
+            .ToListAsync(TestContext.Current.CancellationToken);
+        orchestrators.Should().ContainSingle();
+        (await db.ConversationReadModels.CountAsync(
+            conversation => conversation.PersonaId == orchestrators[0].Id,
+            TestContext.Current.CancellationToken)).Should().Be(1);
     }
 
     [Fact]

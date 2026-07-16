@@ -5,7 +5,10 @@ using Iris.Application.AiIntegration.Tools;
 using Iris.Application.Personas;
 using Iris.Domain.AiIntegration;
 using Iris.Infrastructure.AiIntegration;
+using Iris.Domain.Personas;
+using Iris.Application.Exceptions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 
 namespace Iris.Tests.Unit.AiIntegration;
@@ -16,10 +19,10 @@ public class ToolRegistryTests
     private readonly Guid _personaId = Guid.NewGuid();
 
     [Fact]
-    public async Task GetToolsForPersonaAsync_OrchestratorRole_ReturnsRegisteredTools()
+    public async Task GetToolsForPersonaAsync_SystemPersona_ReturnsRegisteredTools()
     {
         var tool = CreateTool();
-        ConfigurePersona(ToolRegistry.OrchestratorRole);
+        ConfigurePersona(PersonaKind.System, "orchestrator");
         var sut = CreateSut(tool);
 
         var result = await sut.GetToolsForPersonaAsync(
@@ -32,7 +35,7 @@ public class ToolRegistryTests
     [Fact]
     public async Task GetToolsForPersonaAsync_RegularPersona_ReturnsEmpty()
     {
-        ConfigurePersona("companion");
+        ConfigurePersona(PersonaKind.User, "companion");
         var sut = CreateSut(CreateTool());
 
         var result = await sut.GetToolsForPersonaAsync(
@@ -45,7 +48,7 @@ public class ToolRegistryTests
     [Fact]
     public async Task ExecuteAsync_UnknownTool_ReturnsFailedResult()
     {
-        ConfigurePersona(ToolRegistry.OrchestratorRole);
+        ConfigurePersona(PersonaKind.System, "orchestrator");
         var tool = CreateTool();
         var sut = CreateSut(tool);
 
@@ -65,7 +68,7 @@ public class ToolRegistryTests
     [Fact]
     public async Task ExecuteAsync_EnabledTool_ReturnsItsResult()
     {
-        ConfigurePersona(ToolRegistry.OrchestratorRole);
+        ConfigurePersona(PersonaKind.System, "orchestrator");
         var expected = new ToolResult("{\"ok\":true}", "ok", ToolExecutionStatus.Succeeded);
         var tool = CreateTool(expected);
         var sut = CreateSut(tool);
@@ -81,7 +84,7 @@ public class ToolRegistryTests
     [Fact]
     public async Task ExecuteAsync_PassesToolContextIntact()
     {
-        ConfigurePersona(ToolRegistry.OrchestratorRole);
+        ConfigurePersona(PersonaKind.System, "orchestrator");
         var tool = CreateTool();
         var context = CreateContext();
         var sut = CreateSut(tool);
@@ -120,12 +123,34 @@ public class ToolRegistryTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_ToolThrows_ReturnsFailedResultWithErrorText()
+    public async Task ExecuteAsync_ToolThrows_ReturnsSanitizedFailure()
     {
-        ConfigurePersona(ToolRegistry.OrchestratorRole);
+        ConfigurePersona(PersonaKind.System, "orchestrator");
         var tool = CreateTool();
         tool.ExecuteAsync(Arg.Any<string>(), Arg.Any<ToolContext>(), Arg.Any<CancellationToken>())
             .Returns<Task<ToolResult>>(_ => throw new InvalidOperationException("clock exploded"));
+        var logger = new CapturingLogger<ToolRegistry>();
+        var sut = CreateSut(logger, tool);
+
+        var result = await sut.ExecuteAsync(
+            new ToolCall("call-1", tool.Definition.Name, "{}"),
+            CreateContext(),
+            TestContext.Current.CancellationToken);
+
+        result.Status.Should().Be(ToolExecutionStatus.Failed);
+        result.Preview.Should().Be("Tool execution failed.");
+        result.PayloadJson.Should().NotContain("clock exploded");
+        logger.Exceptions.Should().ContainSingle()
+            .Which.Message.Should().Be("clock exploded");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ValidationFailure_ReturnsActionableMessage()
+    {
+        ConfigurePersona(PersonaKind.System, "orchestrator");
+        var tool = CreateTool();
+        tool.ExecuteAsync(Arg.Any<string>(), Arg.Any<ToolContext>(), Arg.Any<CancellationToken>())
+            .Returns<Task<ToolResult>>(_ => throw new ValidationException("Persona name is required."));
         var sut = CreateSut(tool);
 
         var result = await sut.ExecuteAsync(
@@ -134,8 +159,20 @@ public class ToolRegistryTests
             TestContext.Current.CancellationToken);
 
         result.Status.Should().Be(ToolExecutionStatus.Failed);
-        result.Preview.Should().Be("clock exploded");
-        result.PayloadJson.Should().Contain("clock exploded");
+        result.Preview.Should().Be("Persona name is required.");
+    }
+
+    [Fact]
+    public async Task GetToolsForPersonaAsync_UserKindWithOrchestratorRole_ReturnsEmpty()
+    {
+        ConfigurePersona(PersonaKind.User, "orchestrator");
+        var sut = CreateSut(CreateTool());
+
+        var result = await sut.GetToolsForPersonaAsync(
+            _personaId,
+            TestContext.Current.CancellationToken);
+
+        result.Should().BeEmpty();
     }
 
     [Fact]
@@ -162,7 +199,12 @@ public class ToolRegistryTests
             NullLogger<ToolRegistry>.Instance);
     }
 
-    private void ConfigurePersona(string role)
+    private ToolRegistry CreateSut(ILogger<ToolRegistry> logger, params ITool[] tools)
+    {
+        return new ToolRegistry(_personaService, tools, logger);
+    }
+
+    private void ConfigurePersona(PersonaKind kind, string role)
     {
         _personaService.GetByIdAsync(_personaId, Arg.Any<CancellationToken>())
             .Returns(new PersonaDto(
@@ -174,7 +216,8 @@ public class ToolRegistryTests
                 null,
                 null,
                 DateTimeOffset.UtcNow,
-                DateTimeOffset.UtcNow));
+                DateTimeOffset.UtcNow,
+                kind));
     }
 
     private static ITool CreateTool(ToolResult? result = null)
@@ -185,6 +228,7 @@ public class ToolRegistryTests
             "get_current_time",
             "Get the current time.",
             schema.RootElement.Clone()));
+        tool.FailureMessage.Returns("Tool execution failed.");
         tool.ExecuteAsync(Arg.Any<string>(), Arg.Any<ToolContext>(), Arg.Any<CancellationToken>())
             .Returns(result ?? new ToolResult("{}", null, ToolExecutionStatus.Succeeded));
         return tool;
@@ -192,11 +236,31 @@ public class ToolRegistryTests
 
     private ToolContext CreateContext()
     {
-        return new ToolContext(Guid.NewGuid(), _personaId, Guid.NewGuid());
+        return new ToolContext(Guid.NewGuid(), _personaId, Guid.NewGuid(), "call-1");
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => utcNow;
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<Exception> Exceptions { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (exception is not null)
+                Exceptions.Add(exception);
+        }
     }
 }

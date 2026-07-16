@@ -40,7 +40,8 @@ public class CreateConversationHandlerTests
             null,
             null,
             DateTimeOffset.UtcNow,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            Iris.Domain.Personas.PersonaKind.User);
 
     private static CreateConversationCommand CreateValidCommand(
         Guid? conversationId = null,

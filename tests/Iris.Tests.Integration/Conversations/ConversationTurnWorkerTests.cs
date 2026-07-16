@@ -19,6 +19,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using Iris.Domain.Conversations.Content;
+using Iris.Application.Personas;
 
 namespace Iris.Tests.Integration.Conversations;
 
@@ -45,6 +46,16 @@ public class ConversationTurnWorkerTests
 
     private async Task<Guid> CreatePersonaAsync(string? role = null)
     {
+        if (string.Equals(role, "orchestrator", StringComparison.OrdinalIgnoreCase))
+        {
+            using var scope = _factory.Services.CreateScope();
+            var provisioner = scope.ServiceProvider.GetRequiredService<IOrchestratorProvisioner>();
+            var provisioned = await provisioner.EnsureProvisionedAsync(
+                _userId,
+                TestContext.Current.CancellationToken);
+            return provisioned.PersonaId;
+        }
+
         var persona = await TestPersonas.CreateAsync(
             _factory.Services, _userId, role: role, ct: TestContext.Current.CancellationToken);
         return persona.Id;
@@ -512,6 +523,50 @@ public class ConversationTurnWorkerTests
     }
 
     [Fact]
+    public async Task PostChat_SystemOrchestratorCreatePersonaTool_CompletesAndPersonaAppearsInApi()
+    {
+        var marker = $"create-persona-e2e-{Guid.NewGuid()}";
+        var toolCallId = $"call-{Guid.NewGuid()}";
+
+        _factory.MockChatProvider.StreamAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var request = call.Arg<ChatRequest>();
+                var ct = call.ArgAt<CancellationToken>(1);
+                if (request.Messages.Any(message => message.VisibleText == marker)
+                    && request.Messages.All(message => message.Role != ChatRole.Tool))
+                {
+                    return CreatePersonaToolCallStream(toolCallId, ct);
+                }
+
+                return DefaultStream(ct);
+            });
+
+        var conversationId = await CreateConversationAsync("orchestrator");
+        await PostChatAsync(conversationId, marker);
+
+        await WaitUntilAsync(
+            async () => await GetTurnStatusAsync(conversationId) == ConversationTurnStatus.Completed,
+            TimeSpan.FromSeconds(20));
+
+        var response = await _client.GetAsync("/api/personas", TestContext.Current.CancellationToken);
+        var personas = await response.Content.ReadFromJsonAsync<List<PersonaDto>>(
+            TestJson.Options,
+            cancellationToken: TestContext.Current.CancellationToken);
+        personas.Should().ContainSingle(persona =>
+            persona.Name == "Atlas"
+            && persona.Role == "Study buddy"
+            && persona.Kind == Iris.Domain.Personas.PersonaKind.User);
+
+        var stream = await LoadStreamAsync(conversationId);
+        stream.OfType<ToolExecuted>().Should().ContainSingle(tool =>
+            tool.ToolCallId == toolCallId
+            && tool.Name == "create_persona"
+            && tool.Status == ToolExecutionStatus.Succeeded);
+        stream.OfType<TurnCompleted>().Should().ContainSingle();
+    }
+
+    [Fact]
     public async Task CancelChat_AfterToolExecution_KeepsCompletedRoundAndCancelsLoop()
     {
         var marker = $"e2e-tool-cancel-{Guid.NewGuid()}";
@@ -858,6 +913,27 @@ public class ConversationTurnWorkerTests
             true,
             new UsageInfo(3, 2, 5),
             ToolCalls: [new ToolCall(toolCallId, "get_current_time", "{}", $"fc-{toolCallId}")],
+            FinishReason: FinishReason.ToolCalls);
+        await Task.CompletedTask;
+    }
+
+    private static async IAsyncEnumerable<StreamedChunk> CreatePersonaToolCallStream(
+        string toolCallId,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        yield return new StreamedChunk(
+            null,
+            true,
+            new UsageInfo(3, 2, 5),
+            ToolCalls:
+            [
+                new ToolCall(
+                    toolCallId,
+                    "create_persona",
+                    """{"name":"Atlas","role":"Study buddy"}""",
+                    $"fc-{toolCallId}")
+            ],
             FinishReason: FinishReason.ToolCalls);
         await Task.CompletedTask;
     }

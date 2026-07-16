@@ -300,11 +300,10 @@ public class ChatStreamOrchestrator : IChatStreamOrchestrator
         CancellationToken ct)
     {
         var messages = request.Messages.ToList();
-        var context = new ToolContext(userId, personaId, conversationId);
-
         foreach (var toolCall in toolCalls)
         {
             ct.ThrowIfCancellationRequested();
+            var context = new ToolContext(userId, personaId, conversationId, toolCall.Id);
             var startedAt = _timeProvider.GetTimestamp();
             var result = await _toolRegistry.ExecuteAsync(toolCall, context, ct);
             var durationMs = (long)_timeProvider.GetElapsedTime(startedAt).TotalMilliseconds;

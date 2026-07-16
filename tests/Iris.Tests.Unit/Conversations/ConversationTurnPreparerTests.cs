@@ -24,8 +24,8 @@ public class ConversationTurnPreparerTests
     private ConversationTurnPreparer CreateSut()
     {
         _systemPromptAssembler
-            .BuildAsync(Arg.Any<SystemPromptDto>(), Arg.Any<CancellationToken>())
-            .Returns(call => call.Arg<SystemPromptDto>().Identity);
+            .BuildAsync(Arg.Any<PersonaDto>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<PersonaDto>().SystemPrompt.Identity);
         _toolRegistry.GetToolsForPersonaAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
             .Returns([]);
         _payloadStore.GetByIdsAsync(Arg.Any<IEnumerable<Guid>>(), Arg.Any<CancellationToken>())
@@ -58,7 +58,7 @@ public class ConversationTurnPreparerTests
             ]);
         SetupPersona(personaId, identity: "You are Iris.");
         _systemPromptAssembler
-            .BuildAsync(Arg.Any<SystemPromptDto>(), Arg.Any<CancellationToken>())
+            .BuildAsync(Arg.Any<PersonaDto>(), Arg.Any<CancellationToken>())
             .Returns("<identity>You are Iris.</identity>");
 
         // Act
@@ -100,7 +100,9 @@ public class ConversationTurnPreparerTests
         SetupExistingConversation(conversationId, personaId);
         SetupPersona(personaId, systemPrompt);
         _systemPromptAssembler
-            .BuildAsync(systemPrompt, Arg.Any<CancellationToken>())
+            .BuildAsync(
+                Arg.Is<PersonaDto>(persona => persona.SystemPrompt == systemPrompt),
+                Arg.Any<CancellationToken>())
             .Returns("assembled prompt");
 
         // Act
@@ -617,6 +619,7 @@ public class ConversationTurnPreparerTests
                 null,
                 null,
                 DateTimeOffset.UtcNow,
-                DateTimeOffset.UtcNow));
+                DateTimeOffset.UtcNow,
+                Iris.Domain.Personas.PersonaKind.User));
     }
 }

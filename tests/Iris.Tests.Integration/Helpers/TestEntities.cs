@@ -58,7 +58,7 @@ public static class TestPersonaClient
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
 
-        var persona = await response.Content.ReadFromJsonAsync<PersonaDto>(cancellationToken: ct);
+        var persona = await response.Content.ReadFromJsonAsync<PersonaDto>(TestJson.Options, ct);
         return persona!;
     }
 }

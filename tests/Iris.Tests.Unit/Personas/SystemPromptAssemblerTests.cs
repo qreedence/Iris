@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Iris.Application.Personas;
+using Iris.Domain.Personas;
 
 namespace Iris.Tests.Unit.Personas;
 
@@ -107,6 +108,26 @@ public class SystemPromptAssemblerTests
         result.Should().Be(Section("identity", "Identity"));
     }
 
+    [Fact]
+    public async Task BuildAsync_SystemPersona_UsesConfiguredOrchestratorPromptAndIgnoresEditableSections()
+    {
+        var sut = new SystemPromptAssembler(
+            new TestGlobalSystemPromptProvider("App context", "Guidelines", "Onboarding instructions"));
+        var persona = CreatePersona(
+            PersonaKind.System,
+            new SystemPromptDto("Must not leak", "Voice", "Role", "Relationship", "Tools"));
+
+        var result = await sut.BuildAsync(persona, TestContext.Current.CancellationToken);
+
+        result.Should().Be(JoinSections([
+            Section("app_context", "App context"),
+            Section("guidelines", "Guidelines"),
+            Section("orchestrator", "Onboarding instructions")
+        ]));
+        result.Should().NotContain("Must not leak");
+        result.Should().NotContain("<identity>");
+    }
+
     private static SystemPromptAssembler CreateSut(string? appContext, string? guidelines)
     {
         return new SystemPromptAssembler(new TestGlobalSystemPromptProvider(appContext, guidelines));
@@ -126,9 +147,12 @@ public class SystemPromptAssemblerTests
     {
         private readonly GlobalSystemPromptSections _sections;
 
-        public TestGlobalSystemPromptProvider(string? appContext, string? guidelines)
+        public TestGlobalSystemPromptProvider(
+            string? appContext,
+            string? guidelines,
+            string? orchestrator = null)
         {
-            _sections = new GlobalSystemPromptSections(appContext, guidelines);
+            _sections = new GlobalSystemPromptSections(appContext, guidelines, orchestrator);
         }
 
         public Task<GlobalSystemPromptSections> GetAsync(CancellationToken ct = default)
@@ -136,4 +160,16 @@ public class SystemPromptAssemblerTests
             return Task.FromResult(_sections);
         }
     }
+
+    private static PersonaDto CreatePersona(PersonaKind kind, SystemPromptDto prompt) => new(
+        Guid.NewGuid(),
+        "Iris",
+        prompt,
+        null,
+        "orchestrator",
+        null,
+        null,
+        DateTimeOffset.UtcNow,
+        DateTimeOffset.UtcNow,
+        kind);
 }

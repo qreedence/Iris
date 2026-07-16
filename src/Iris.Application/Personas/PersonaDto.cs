@@ -1,3 +1,5 @@
+using Iris.Domain.Personas;
+
 namespace Iris.Application.Personas;
 
 public record PersonaDto(
@@ -9,4 +11,5 @@ public record PersonaDto(
     string? Group,
     string? Avatar,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    PersonaKind Kind);

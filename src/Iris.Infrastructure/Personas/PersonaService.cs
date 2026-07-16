@@ -33,7 +33,8 @@ public class PersonaService : IPersonaService
             p.Group,
             p.Avatar,
             p.CreatedAt,
-            p.UpdatedAt);
+            p.UpdatedAt,
+            p.Kind);
 
     private static readonly Func<Persona, PersonaDto> MapToDto = ProjectToDto.Compile();
 
@@ -71,6 +72,7 @@ public class PersonaService : IPersonaService
             Id = Guid.NewGuid(),
             UserId = userId,
             Name = request.Name,
+            Kind = PersonaKind.User,
             SystemPrompt = CreateSystemPrompt(request.SystemPrompt, now),
             ModelPreference = request.ModelPreference,
             Role = request.Role,
@@ -102,6 +104,8 @@ public class PersonaService : IPersonaService
         if (persona is null)
             throw new NotFoundException("Persona not found.");
 
+        EnsureUserManaged(persona);
+
         persona.Name = request.Name;
         persona.ModelPreference = request.ModelPreference;
         persona.Role = request.Role;
@@ -127,6 +131,8 @@ public class PersonaService : IPersonaService
 
         if (persona is null)
             throw new NotFoundException("Persona not found.");
+
+        EnsureUserManaged(persona);
 
         var now = DateTimeOffset.UtcNow;
         persona.IsDeleted = true;
@@ -155,6 +161,12 @@ public class PersonaService : IPersonaService
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new ValidationException("Persona name is required.");
+    }
+
+    private static void EnsureUserManaged(Persona persona)
+    {
+        if (persona.Kind == PersonaKind.System)
+            throw new ValidationException("System personas cannot be modified.");
     }
 
     private static PersonaDto ToDto(Persona persona)

@@ -50,6 +50,33 @@ public class PersonaSystemPromptEndpointTests
         prompt.Role.Should().Be("Help the user.");
     }
 
+    [Theory]
+    [InlineData("GET", "/api/personas/{0}/system-prompt")]
+    [InlineData("PUT", "/api/personas/{0}/system-prompt")]
+    [InlineData("PUT", "/api/personas/{0}/system-prompt/sections/identity")]
+    [InlineData("DELETE", "/api/personas/{0}/system-prompt/sections/identity")]
+    public async Task SystemPromptEndpoint_SystemPersona_Returns400(string method, string routeTemplate)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var provisioner = scope.ServiceProvider.GetRequiredService<IOrchestratorProvisioner>();
+        var orchestrator = await provisioner.EnsureProvisionedAsync(
+            _userId,
+            TestContext.Current.CancellationToken);
+        var route = string.Format(routeTemplate, orchestrator.PersonaId);
+        using var request = new HttpRequestMessage(new HttpMethod(method), route);
+        if (method == "PUT")
+        {
+            request.Content = JsonContent.Create(
+                route.Contains("sections", StringComparison.Ordinal)
+                    ? (object)new UpdateSystemPromptSectionRequest("Nope")
+                    : new SystemPromptSectionsRequest(Identity: "Nope"));
+        }
+
+        var response = await _client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
     [Fact]
     public async Task GetSystemPrompt_OtherUsersPersona_Returns404()
     {

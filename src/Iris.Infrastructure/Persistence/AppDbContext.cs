@@ -30,6 +30,7 @@ public class AppDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Guid
     public DbSet<ToolResultPayload> ToolResultPayloads { get; set; }
     public DbSet<Persona> Personas { get; set; }
     public DbSet<SystemPrompt> SystemPrompts { get; set; }
+    public DbSet<PersonaCreationToolExecution> PersonaCreationToolExecutions { get; set; }
     public DbSet<RefreshToken> RefreshTokens { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

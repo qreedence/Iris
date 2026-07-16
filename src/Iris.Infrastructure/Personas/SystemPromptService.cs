@@ -98,6 +98,9 @@ public class SystemPromptService : ISystemPromptService
         if (persona is null)
             throw new NotFoundException("Persona not found.");
 
+        if (persona.Kind == PersonaKind.System)
+            throw new ValidationException("System persona prompts are managed by Iris configuration.");
+
         return persona.SystemPrompt
             ?? throw new NotFoundException("System prompt not found.");
     }

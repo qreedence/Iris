@@ -1,5 +1,7 @@
 using Iris.Application.AiIntegration;
+using Iris.Application.AiIntegration.Tools;
 using Iris.Domain.Conversations.Content;
+using Iris.Infrastructure.AiIntegration;
 using Iris.Infrastructure.Persistence;
 using Iris.Tests.Integration.Helpers;
 using Microsoft.AspNetCore.Authentication;
@@ -51,6 +53,7 @@ public class ApiTestFactory : WebApplicationFactory<Program>, IAsyncLifetime
                 ["Google:ClientSecret"] = "test-google-client-secret",
                 ["IrisSystemPrompt:AppContext"] = "Test app context",
                 ["IrisSystemPrompt:Guidelines"] = "Test guidelines",
+                ["IrisSystemPrompt:Orchestrator"] = "Test orchestrator prompt",
                 // Fast poll so tests don't sleep waiting for the worker to notice work.
                 ["TurnProcessing:PollInterval"] = "00:00:00.100"
             });
@@ -76,6 +79,10 @@ public class ApiTestFactory : WebApplicationFactory<Program>, IAsyncLifetime
                 services.Remove(chatProviderDescriptor);
 
             services.AddSingleton(MockChatProvider);
+
+            // QRE-337's generic engine tests keep the deterministic smoke tool;
+            // production registration exposes only create_persona to System personas.
+            services.AddScoped<ITool, GetCurrentTimeTool>();
 
             services.AddSignalR(options => options.EnableDetailedErrors = true)
                 .AddJsonProtocol(options =>

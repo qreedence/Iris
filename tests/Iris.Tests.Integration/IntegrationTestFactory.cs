@@ -59,9 +59,10 @@ public class IntegrationTestFactory : IAsyncLifetime
         services.AddScoped<IConversationTurnRequestStore, EfConversationTurnRequestStore>();
         services.AddScoped<IToolResultPayloadStore, EfToolResultPayloadStore>();
         services.AddScoped<IToolRegistry, ToolRegistry>();
-        services.AddScoped<ITool, GetCurrentTimeTool>();
+        services.AddScoped<ITool, CreatePersonaTool>();
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<IPersonaService, PersonaService>();
+        services.AddScoped<IOrchestratorProvisioner, OrchestratorProvisioner>();
         services.AddSingleton<ITurnDoorbell, Iris.Api.Conversations.TurnDoorbell>();
         services.AddSingleton<IActiveTurnRegistry, Iris.Api.Conversations.ActiveTurnRegistry>();
         services.AddSingleton(MockChatProvider);
